@@ -5,9 +5,81 @@
         <meta name="description" content="Ejemplo de HTML5">
         <meta name="keywords" content="HTML5, CSS3, JavaScript">
         <title>Notas y Recordatorios</title>
+        <link rel="shortcut icon" href="./img/Logo_Notas.ico" />
         <link rel="stylesheet" href="./styles/style_tareas.css">
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     </head>
-    <body></body>
+    <body>
+  <div id="app">
+    <div class="toolbar">
+      <h2>Planificador de Tareas</h2>
+      <div>
+        <button @click="vista='tablero'">Tablero</button>
+        <button @click="vista='tabla'">Tabla</button>
+        <button @click="mostrarFormulario = !mostrarFormulario">➕</button>
+      </div>
+    </div>
+
+    <div v-if="mostrarFormulario" class="form">
+      <input v-model="nuevaTarea.nombre" placeholder="Nombre de la tarea">
+      <select v-model="nuevaTarea.importancia">
+        <option disabled value="">Importancia</option>
+        <option>Alta</option>
+        <option>Media</option>
+        <option>Baja</option>
+      </select>
+      <input type="date" v-model="nuevaTarea.fecha_limite">
+      <input v-model="nuevaTarea.persona" placeholder="Persona encargada">
+      <button @click="agregarTarea">Añadir</button>
+    </div>
+
+    <div v-if="vista==='tablero'" class="board">
+      <div class="column" v-for="estado in ['Sin empezar','En curso','Listo']" :key="estado"
+           @dragover.prevent="dragOver(estado, $event)"
+           @drop="drop(estado)">
+        <h3>{{ estado }}</h3>
+        <div class="task" v-for="(tarea, i) in tareas.filter(t=>t.status===estado)" :key="tarea.nombre"
+             draggable="true"
+             @dragstart="dragStart(tarea)"
+             @dragend="dragEnd">
+          <span>{{ tarea.nombre }}</span>
+          <button class="delete" @click="eliminarTarea(i, estado)">❌</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-else>
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Importancia</th>
+            <th>Status</th>
+            <th>Fecha de creación</th>
+            <th>Fecha Límite</th>
+            <th>Persona</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(tarea, i) in tareas" :key="tarea.nombre">
+            <td>{{ tarea.nombre }}</td>
+            <td :class="'importance '+tarea.importancia">{{ tarea.importancia }}</td>
+            <td><span :class="'status '+tarea.status">{{ tarea.status }}</span></td>
+            <td>{{ tarea.fecha }}</td>
+            <td>{{ tarea.fecha_limite }}</td>
+            <td>{{ tarea.persona }}</td>
+            <td><button class="delete" @click="eliminarTareaTabla(i)">❌</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+
 </html>
