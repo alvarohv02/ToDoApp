@@ -16,10 +16,22 @@ Simple planning app with **two views** (Kanban Board and Table) built with **HTM
 ## Project structure
 
 ```
-/project
- ├── index.html    # Main HTML (includes Vue via CDN)
- ├── style.css     # Styles
- └── app.js        # Vue logic + drag & drop + ⋮ menu
+/web
+ ├── templates
+      ├── index.html
+      ├── tareas.html
+      └── calendar.html
+ ├── static
+      ├── css
+           ├── style_index.css
+           ├── style_tareas.css
+           └── style_calendar.css
+      ├── js
+           └── app.js
+      └── img
+           ├── Logo_Notas.ico
+           └── Logo_Notas.png 
+ └── app.py
 ```
 
 ## Dependencies
@@ -29,6 +41,17 @@ Simple planning app with **two views** (Kanban Board and Table) built with **HTM
 ```html
 <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
 ```
+
+* Flask
+
+```powershell
+pip install Flask
+```
+
+## How to run
+
+* Run ```app.py``` in file explorer (vscode may cause problems if run through it)
+* Open localhost on any browser (most likely port 5000)
 
 ## Key functionality
 
@@ -46,3 +69,4 @@ Simple planning app with **two views** (Kanban Board and Table) built with **HTM
 
 * UI inspired by **Notion/Trello**-style tools.
 * Built with **Vue 3** (CDN) for simplicity.
+
