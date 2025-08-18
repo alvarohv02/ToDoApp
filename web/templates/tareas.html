@@ -16,18 +16,18 @@
     <div class="toolbar">
       <nav class="nav_bar">
             <div class="logo">
-                <a href="./index.html">
+                <a href="/">
                     <img class="logo_inicio" src="../static/img/Logo_Notas.png" alt="Logo_Notas">
                 </a>
             </div>
             <div class="elemento_nav">
-                <a class="boton_nav" href="./index.html">Inicio</a>
+                <a class="boton_nav" href="/">Inicio</a>
             </div>
             <div class="elemento_nav">
-                <a class="boton_nav" href="./tareas.html">Tareas</a>
+                <a class="boton_nav" href="/tareas">Tareas</a>
             </div>
             <div class="elemento_nav">
-                <a class="boton_nav" href="./calendar.html">Calendario</a>
+                <a class="boton_nav" href="/calendar">Calendario</a>
             </div>
         </nav>
       <div>
@@ -54,12 +54,12 @@
       <div class="column" v-for="estado in ['Sin Empezar','En Curso','Terminado']" :key="estado.replace(/\s+/g, '-')" :key="estado"
            @dragover.prevent="dragOver(estado, $event)"
            @drop="drop(estado)">
-        <h3>{{ estado }}</h3>
+        <h3 v-text="estado"></h3>
         <div class="task" v-for="(tarea, i) in tareas.filter(t=>t.status===estado)" :key="tarea.nombre"
              draggable="true"
              @dragstart="dragStart(tarea)"
              @dragend="dragEnd">
-          <span>{{ tarea.nombre }}</span>
+          <span v-text="tarea.nombre"></span>
           <button class="delete" @click="eliminarTarea(i, estado)">❌</button>
         </div>
       </div>
@@ -80,12 +80,12 @@
         </thead>
         <tbody>
           <tr v-for="(tarea, i) in tareas" :key="tarea.nombre">
-            <td>{{ tarea.nombre }}</td>
-            <td :class="'importance '+tarea.importancia">{{ tarea.importancia }}</td>
-            <td><span :class="'status '+tarea.status">{{ tarea.status }}</span></td>
-            <td>{{ tarea.fecha }}</td>
-            <td>{{ formatearFecha(tarea.fecha_limite) }}</td>
-            <td>{{ tarea.persona }}</td>
+            <td v-text="tarea.nombre"></td>
+            <td v-text="tarea.importancia"></td>
+            <td><span :class="'status '+tarea.status" v-text="tarea.status"></span></td>
+            <td v-text="tarea.fecha"></td>
+            <td v-text="formatearFecha(tarea.fecha_limite)"></td>
+            <td v-text="tarea.persona"></td>
             <td class="acciones">
               <div class="menu-wrapper">
                 <button class="menu-btn" @click="toggleMenu(i)">⋮</button>
@@ -93,7 +93,7 @@
                   <button @click="abrirModal(tarea, i)">Modificar</button>
                   <div v-if="mostrarModal" class="modal-overlay">
                     <div class="modal">
-                      <h3>Modificando tarea: {{ tarea.nombre }}</h3>
+                      <h3>Modificando tarea: {{ "{{ tarea.nombre}}" }} </h3>
                       <label>
                         Persona encargada:
                         <input type="text" v-model="tareaEditando.persona" />
@@ -133,8 +133,7 @@
       </table>
     </div>
   </div>
-
-  <script src="../static/js/app.js"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 
 

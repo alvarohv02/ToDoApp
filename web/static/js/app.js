@@ -15,24 +15,7 @@ createApp({
     }
   },
 
-// TODO
-
-  // mounted() {
-    // document.addEventListener("click", this.handleClickOutside);
-  // },
-  // beforeUnmount() {
-    // document.removeEventListener("click", this.handleClickOutside);
-  // },
-
   methods: {
-    // handleClickOutside(event) {
-      // if (!event.target.closest(".menu-wrapper")) {
-        // this.menuAbierto = null;
-      // }
-      // if (this.mostrarModal && !event.target.closest(".modal")) {
-        // this.cerrarModal();
-      // }
-    // },
 
     formatearFecha(fechaStr) {
       const [year, month, day] = fechaStr.split("-");
