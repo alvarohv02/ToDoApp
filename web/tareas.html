@@ -84,13 +84,46 @@
             <td :class="'importance '+tarea.importancia">{{ tarea.importancia }}</td>
             <td><span :class="'status '+tarea.status">{{ tarea.status }}</span></td>
             <td>{{ tarea.fecha }}</td>
-            <td>{{ tarea.fecha_limite }}</td>
+            <td>{{ formatearFecha(tarea.fecha_limite) }}</td>
             <td>{{ tarea.persona }}</td>
             <td class="acciones">
               <div class="menu-wrapper">
                 <button class="menu-btn" @click="toggleMenu(i)">⋮</button>
                 <div v-if="menuAbierto === i" class="menu-panel">
-                  <button @click="modificarTarea(i)">Modificar</button>
+                  <button @click="abrirModal(tarea, i)">Modificar</button>
+                  <div v-if="mostrarModal" class="modal-overlay">
+                    <div class="modal">
+                      <h3>Modificando tarea: {{ tarea.nombre }}</h3>
+                      <label>
+                        Persona encargada:
+                        <input type="text" v-model="tareaEditando.persona" />
+                      </label>
+                      <label>
+                        Importancia:
+                        <select v-model="tareaEditando.importancia">
+                          <option>Alta</option>
+                          <option>Media</option>
+                          <option>Baja</option>
+                        </select>
+                      </label>
+                      <label>
+                        Status:
+                        <select v-model="tareaEditando.status">
+                          <option>Sin Empezar</option>
+                          <option>En Curso</option>
+                          <option>Terminado</option>
+                        </select>
+                      </label>
+                      <label>
+                        Fecha límite:
+                        <input type="date" v-model="tareaEditando.fecha_limite" />
+                      </label>                      
+                      <div class="modal-actions">
+                        <button @click="guardarEdicion">Guardar</button>
+                        <button @click="cerrarModal">Cancelar</button>
+                      </div>
+                    </div>
+                  </div>
                   <button @click="eliminarTareaTabla(i)">Borrar</button>
                 </div>
               </div>

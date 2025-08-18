@@ -1,13 +1,5 @@
 const { createApp } = Vue;
 
-function formatearFecha(fechaStr) {
-  const [year, month, day] = fechaStr.split("-");
-  const d = Number(day);
-  const m = Number(month);
-  
-  return `${d}/${m}/${year}`;
-}
-
 createApp({
   data() {
     return {
@@ -15,18 +7,46 @@ createApp({
       mostrarFormulario: false,
       tareaArrastrando: null,
       menuAbierto: null,
+      mostrarModal: false,
+      tareaEditando: null,
+      indiceEditando: null,
       nuevaTarea: { nombre: "", importancia: "", fecha_limite: "", persona: "" },
       tareas: []
     }
   },
   methods: {
-    toggleMenu(index) {
-      this.menuAbierto = this.menuAbierto === index ? null : index;
+    formatearFecha(fechaStr) {
+      const [year, month, day] = fechaStr.split("-");
+      const d = Number(day);
+      const m = Number(month);
+      return `${d}/${m}/${year}`;
     },
 
-    modificarTarea(index) {
-      alert("Formulario para modificar la tarea: " + this.tareas[index].nombre);
-      this.menuAbierto = null;
+    abrirModal(tarea, index) {
+      this.tareaEditando = { ...tarea };
+      this.indiceEditando = index;
+      this.mostrarModal = true;
+    },
+
+    cerrarModal() {
+      this.mostrarModal = false;
+      this.tareaEditando = null;
+      this.indiceEditando = null;
+    },
+
+    guardarEdicion() {
+      if (this.indiceEditando !== null) {
+        const tarea = this.tareas[this.indiceEditando];
+        tarea.status = this.tareaEditando.status
+        tarea.fecha_limite = this.tareaEditando.fecha_limite;
+        tarea.importancia = this.tareaEditando.importancia;
+        tarea.persona = this.tareaEditando.persona;
+      }
+      this.cerrarModal();
+    },
+
+    toggleMenu(index) {
+      this.menuAbierto = this.menuAbierto === index ? null : index;
     },
 
     eliminarTareaTabla(index) {
@@ -49,7 +69,7 @@ createApp({
       this.tareas.push({
         nombre: this.nuevaTarea.nombre,
         importancia: this.nuevaTarea.importancia,
-        fecha_limite: formatearFecha(this.nuevaTarea.fecha_limite),
+        fecha_limite: this.nuevaTarea.fecha_limite,
         status: "Sin Empezar",
         fecha: new Date().toLocaleDateString(),
         persona: this.nuevaTarea.persona || "Sin asignar"
