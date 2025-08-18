@@ -36,7 +36,7 @@
     </div>
 
     <div v-if="vista==='tablero'" class="board">
-      <div class="column" v-for="estado in ['Sin empezar','En curso','Listo']" :key="estado"
+      <div class="column" v-for="estado in ['Sin empezar','En curso','Terminado']" :key="estado.replace(/\s+/g, '-')" :key="estado"
            @dragover.prevent="dragOver(estado, $event)"
            @drop="drop(estado)">
         <h3>{{ estado }}</h3>
@@ -71,7 +71,15 @@
             <td>{{ tarea.fecha }}</td>
             <td>{{ tarea.fecha_limite }}</td>
             <td>{{ tarea.persona }}</td>
-            <td><button class="delete" @click="eliminarTareaTabla(i)">❌</button></td>
+            <td class="acciones">
+              <div class="menu-wrapper">
+                <button class="menu-btn" @click="toggleMenu(i)">⋮</button>
+                <div v-if="menuAbierto === i" class="menu-panel">
+                  <button @click="modificarTarea(i)">Modificar</button>
+                  <button @click="eliminarTareaTabla(i)">Borrar</button>
+                </div>
+              </div>
+            </td>
           </tr>
         </tbody>
       </table>

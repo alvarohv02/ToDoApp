@@ -14,11 +14,26 @@ createApp({
       vista: 'tablero',
       mostrarFormulario: false,
       tareaArrastrando: null,
+      menuAbierto: null,
       nuevaTarea: { nombre: "", importancia: "", fecha_limite: "", persona: "" },
       tareas: []
     }
   },
   methods: {
+    toggleMenu(index) {
+      this.menuAbierto = this.menuAbierto === index ? null : index;
+    },
+
+    modificarTarea(index) {
+      alert("Formulario para modificar la tarea: " + this.tareas[index].nombre);
+      this.menuAbierto = null;
+    },
+
+    eliminarTareaTabla(index) {
+      this.tareas.splice(index, 1);
+      this.menuAbierto = null;
+    },
+
     dragStart(tarea) { this.tareaArrastrando = tarea; },
     dragEnd() { this.tareaArrastrando = null; },
     dragOver(estado, event) { event.currentTarget.classList.add('highlight'); },

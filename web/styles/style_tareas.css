@@ -69,15 +69,15 @@ th, td {
     border-radius: 5px;
 }
 
-.status.Sin\ empezar {
-    background: gray;
+.status.Sin.empezar {
+    background: rgb(255, 0, 0);
 }
 
-.status.En\ curso {
-    background: dodgerblue;
+.status.En.curso {
+    background: rgb(154, 149, 5);
 }
 
-.status.Listo {
+.status.Terminado {
     background: seagreen;
 }
 
@@ -133,11 +133,48 @@ th, td {
   align-items: center;
 }
 
-.delete {
+.acciones {
+  position: relative;
+}
+
+.menu-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.menu-btn {
   background: transparent;
   border: none;
-  color: #f55;
+  font-size: 1.2rem;
   cursor: pointer;
-  font-size: 1rem;
-  margin-left: .5rem;
+  color: #fff;
+}
+
+.menu-panel {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: .5rem;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  min-width: 120px;
+  z-index: 10;
+}
+
+.menu-panel button {
+  background: none;
+  border: none;
+  color: #fff;
+  text-align: left;
+  padding: .3rem .5rem;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.menu-panel button:hover {
+  background: #444;
 }

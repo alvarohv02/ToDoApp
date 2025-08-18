@@ -1,13 +1,13 @@
-body{
+body {
     background-color: rgba(0, 0, 0, 0.882);
 }
 
-.logo_inicio{
+.logo_inicio {
     height: 90px;
     flex: 1;
 }
 
-.nav_bar{
+.nav_bar {
     height: 70px;
     display: flex;
     flex-direction: row;
@@ -15,19 +15,19 @@ body{
     align-items: center;
 }
 
-.boton_nav{
+.boton_nav {
     color: white;
     padding: 5px 13px 8px 13px;
     border-radius: 3cm;
 }
 
-.boton_nav:hover{
+.boton_nav:hover {
     border-radius: 2cm;
     transition: all 0.2s linear;
     background-color: rgb(100, 92, 90);
 }
 
-.countdown{
+.countdown {
     text-align: center;
     background: #716b6b;
     padding: 20px 40px;
