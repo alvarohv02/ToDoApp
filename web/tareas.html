@@ -14,7 +14,22 @@
     <body>
   <div id="app">
     <div class="toolbar">
-      <h2>Planificador de Tareas</h2>
+      <nav class="nav_bar">
+            <div class="logo">
+                <a href="./index.html">
+                    <img class="logo_inicio" src="./img/Logo_Notas.png" alt="Logo_Notas">
+                </a>
+            </div>
+            <div class="elemento_nav">
+                <a class="boton_nav" href="./index.html">Inicio</a>
+            </div>
+            <div class="elemento_nav">
+                <a class="boton_nav" href="./tareas.html">Tareas</a>
+            </div>
+            <div class="elemento_nav">
+                <a class="boton_nav" href="calendar.html">Calendario</a>
+            </div>
+        </nav>
       <div>
         <button @click="vista='tablero'">Tablero</button>
         <button @click="vista='tabla'">Tabla</button>
@@ -36,7 +51,7 @@
     </div>
 
     <div v-if="vista==='tablero'" class="board">
-      <div class="column" v-for="estado in ['Sin empezar','En curso','Terminado']" :key="estado.replace(/\s+/g, '-')" :key="estado"
+      <div class="column" v-for="estado in ['Sin Empezar','En Curso','Terminado']" :key="estado.replace(/\s+/g, '-')" :key="estado"
            @dragover.prevent="dragOver(estado, $event)"
            @drop="drop(estado)">
         <h3>{{ estado }}</h3>

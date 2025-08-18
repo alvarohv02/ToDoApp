@@ -50,7 +50,7 @@ createApp({
         nombre: this.nuevaTarea.nombre,
         importancia: this.nuevaTarea.importancia,
         fecha_limite: formatearFecha(this.nuevaTarea.fecha_limite),
-        status: "Sin empezar",
+        status: "Sin Empezar",
         fecha: new Date().toLocaleDateString(),
         persona: this.nuevaTarea.persona || "Sin asignar"
       });

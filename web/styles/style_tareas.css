@@ -12,6 +12,31 @@ body {
     background: #2a2a2a;
 }
 
+.logo_inicio {
+    height: 90px;
+    flex: 1;
+}
+
+.nav_bar {
+    height: 70px;
+    display: flex;
+    flex-direction: row;
+    gap: 40px;
+    align-items: center;
+}
+
+.boton_nav {
+    color: white;
+    padding: 5px 13px 8px 13px;
+    border-radius: 3cm;
+}
+
+.boton_nav:hover {
+    border-radius: 2cm;
+    transition: all 0.2s linear;
+    background-color: rgb(100, 92, 90);
+}
+
 button {
     background: #3a3a3a;
     border: none;
@@ -69,11 +94,11 @@ th, td {
     border-radius: 5px;
 }
 
-.status.Sin.empezar {
+.status.Sin.Empezar {
     background: rgb(255, 0, 0);
 }
 
-.status.En.curso {
+.status.En.Curso {
     background: rgb(154, 149, 5);
 }
 
