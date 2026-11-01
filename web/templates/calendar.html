@@ -1,31 +1,135 @@
-<!DOCTYPE html>
-<html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="description" content="Ejemplo de HTML5">
-        <meta name="keywords" content="HTML5, CSS3, JavaScript">
-        <title>Notas y Recordatorios</title>
-        <link rel="shortcut icon" href="../static/img/Logo_Notas.ico" />
-        <link rel="stylesheet" href="../static/css/style_index.css" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    </head>
-    <body>
-        <div class="toolbar">
-        <nav class="nav_bar">
-            <div class="logo">
-                <a href="/">
-                    <img class="logo_inicio" src="../static/img/Logo_Notas.png" alt="Logo_Notas">
-                </a>
-            </div>
-            <div class="elemento_nav">
-                <a class="boton_nav" href="/">Inicio</a>
-            </div>
-            <div class="elemento_nav">
-                <a class="boton_nav" href="/tareas">Tareas</a>
-            </div>
-            <div class="elemento_nav">
-                <a class="boton_nav" href="/calendar">Calendario</a>
-            </div>
-        </nav>
+{% extends 'base.html' %}
+{% block titulo %}Calendario{% endblock %}
+
+{% block contenido %}
+<div class="page" id="calendar-app">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Calendario</p>
+            <h1 class="month-title" data-calendar-month></h1>
+            <p class="page-subtitle"><span data-calendar-count></span> · pulsa un día para añadir un evento</p>
+            <p class="google-sync" data-google-sync hidden>
+                <span class="google-dot"></span>
+                <span data-google-texto>Google Calendar</span>
+                <button type="button" class="google-boton" data-google-boton title="Sincronizar ahora con Google Calendar">⟳ Sincronizar</button>
+            </p>
         </div>
+        <div class="page-actions">
+            <div class="segmented" role="group" aria-label="Cambiar de mes">
+                <button type="button" class="view-btn" data-calendar-prev aria-label="Mes anterior">‹</button>
+                <button type="button" class="view-btn" data-calendar-today>Hoy</button>
+                <button type="button" class="view-btn" data-calendar-next aria-label="Mes siguiente">›</button>
+            </div>
+            <button type="button" class="btn btn-primary" data-event-new>+ Nuevo evento</button>
+        </div>
+    </header>
+
+    <section class="card event-form-panel" data-event-panel hidden>
+        <div class="card-header">
+            <div>
+                <h2 class="card-title" data-event-form-title>Nuevo evento</h2>
+                <p class="card-text">Los eventos no envían avisos: aparecen aquí y cuando le preguntas al bot qué tienes.</p>
+            </div>
+        </div>
+        <form class="event-form" data-event-form>
+            <fieldset class="alcance event-field-wide" data-event-alcance hidden>
+                <legend>🔁 Este evento se repite. ¿A qué aplicar los cambios?</legend>
+                <label class="alcance-opcion"><input type="radio" name="alcance" value="uno" checked> <span data-alcance-uno>Solo este día</span></label>
+                <label class="alcance-opcion" data-alcance-siguientes><input type="radio" name="alcance" value="siguientes"> Este y los siguientes</label>
+                <label class="alcance-opcion"><input type="radio" name="alcance" value="serie"> Toda la serie</label>
+            </fieldset>
+            <label class="field event-field-wide">
+                <span>Título</span>
+                <input class="input" name="titulo" required maxlength="120" placeholder="Clase de Cálculo, Cumple de Marta...">
+            </label>
+            <label class="field">
+                <span>Categoría</span>
+                <select class="input" name="categoria">
+                    <option>Clase</option>
+                    <option>Cumpleaños</option>
+                    <option>Reunión</option>
+                    <option>Examen</option>
+                    <option selected>Otro</option>
+                </select>
+            </label>
+            <label class="field">
+                <span>Fecha</span>
+                <input class="input" type="date" name="fecha" required>
+            </label>
+            <label class="field">
+                <span>Hora de inicio</span>
+                <input class="input" type="time" name="hora_inicio">
+            </label>
+            <label class="field">
+                <span>Hora de fin</span>
+                <input class="input" type="time" name="hora_fin">
+            </label>
+            <label class="field">
+                <span>Repetir</span>
+                <select class="input" name="repeticion">
+                    <option value="">No se repite</option>
+                    <option value="semanal">Cada semana</option>
+                    <option value="anual">Cada año</option>
+                </select>
+            </label>
+            <label class="field" data-event-hasta hidden>
+                <span>Hasta (opcional)</span>
+                <input class="input" type="date" name="hasta">
+            </label>
+            <p class="event-form-error" data-event-error></p>
+            <div class="event-form-actions">
+                <button type="submit" class="btn btn-primary">Guardar</button>
+                <button type="button" class="btn btn-danger" data-event-delete hidden>Borrar</button>
+                <button type="button" class="btn btn-ghost" data-event-close>Cerrar</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card calendar-card">
+        <div class="calendar-legend" aria-label="Leyenda">
+            <span class="legend-item categoria-clase">Clases</span>
+            <span class="legend-item categoria-cumpleanos">Cumpleaños</span>
+            <span class="legend-item categoria-reunion">Reuniones</span>
+            <span class="legend-item categoria-examen">Exámenes</span>
+            <span class="legend-item categoria-otro">Otros</span>
+            <span class="legend-item legend-task">Tareas</span>
+        </div>
+        <div class="calendar-grid" data-calendar-grid></div>
+    </section>
+
+    <section class="card agenda-panel">
+        <div class="card-header">
+            <div>
+                <h2 class="card-title" data-agenda-titulo>Agenda del mes</h2>
+                <p class="card-text">Lo que queda pendiente, en orden. Pulsa un evento para editarlo.</p>
+            </div>
+        </div>
+        <div class="agenda-filtros" data-agenda-filtros>
+            <div class="filtros-fila">
+                <input type="search" class="input filtro-texto" placeholder="🔍 Buscar..." aria-label="Buscar por texto" data-filtro-texto>
+                <label class="filtro-campo">Periodo
+                    <select class="input" data-filtro-periodo>
+                        <option value="mes">Mes del calendario</option>
+                        <option value="hoy">Hoy</option>
+                        <option value="semana">Esta semana</option>
+                        <option value="7">Próximos 7 días</option>
+                        <option value="30">Próximos 30 días</option>
+                        <option value="personalizado">Personalizado...</option>
+                    </select>
+                </label>
+                <span class="filtro-rango" data-filtro-rango hidden>
+                    <label class="filtro-campo">Desde <input class="input" type="date" data-filtro-desde></label>
+                    <label class="filtro-campo">Hasta <input class="input" type="date" data-filtro-hasta></label>
+                </span>
+                <label class="filtro-check"><input type="checkbox" data-filtro-pasados> Incluir lo que ya pasó</label>
+            </div>
+            <div class="filtros-fila">
+                <div class="filtro-tipos" role="group" aria-label="Tipos a mostrar" data-filtro-tipos></div>
+                <button type="button" class="filtro-limpiar" data-filtro-limpiar>Limpiar filtros</button>
+                <span class="filtro-resumen" data-filtro-resumen></span>
+            </div>
+        </div>
+        <div class="agenda-list" data-calendar-agenda></div>
+    </section>
+</div>
+{% endblock %}

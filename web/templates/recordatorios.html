@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block titulo %}Recordatorios{% endblock %}
+
+{% block contenido %}
+<div class="page" id="reminders-app">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Recordatorios</p>
+            <h1>Lo que el bot te va a avisar</h1>
+            <p class="page-subtitle">Se crean hablando con el bot («recuérdame mañana a las 10 que…»). Aquí puedes cambiar el texto o la hora, o cancelarlos.</p>
+        </div>
+    </header>
+
+    <section class="stats stats-compact" aria-label="Resumen">
+        <div class="stat stat-accent">
+            <span class="stat-label">Pendientes</span>
+            <strong class="stat-value" data-reminders-pending>–</strong>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Próximo aviso</span>
+            <strong class="stat-value stat-value-small" data-reminders-next>–</strong>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2 class="card-title">Pendientes</h2>
+        </div>
+        <div class="reminder-list" data-reminders-pending-list></div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <div>
+                <h2 class="card-title">Enviados recientemente</h2>
+                <p class="card-text">Últimos 30 días. Pon una hora futura para volver a recibirlos.</p>
+            </div>
+        </div>
+        <div class="reminder-list" data-reminders-done-list></div>
+    </section>
+</div>
+{% endblock %}

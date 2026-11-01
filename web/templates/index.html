@@ -1,40 +1,75 @@
-<!DOCTYPE html>
-<html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="description" content="Ejemplo de HTML5">
-        <meta name="keywords" content="HTML5, CSS3, JavaScript">
-        <title>Notas y Recordatorios</title>
-        <link rel="shortcut icon" href="../static/img/Logo_Notas.ico" />
-        <link rel="stylesheet" href="../static/css/style_index.css" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    </head>
-    <body>
-        <div class="toolbar">
-        <nav class="nav_bar">
-            <div class="logo">
-                <a href="/">
-                    <img class="logo_inicio" src="../static/img/Logo_Notas.png" alt="Logo_Notas">
-                </a>
-            </div>
-            <div class="elemento_nav">
-                <a class="boton_nav" href="/">Inicio</a>
-            </div>
-            <div class="elemento_nav">
-                <a class="boton_nav" href="/tareas">Tareas</a>
-            </div>
-            <div class="elemento_nav">
-                <a class="boton_nav" href="/calendar">Calendario</a>
-            </div>
-        </nav>
+{% extends 'base.html' %}
+{% block titulo %}Inicio{% endblock %}
+
+{% block contenido %}
+<div class="page" id="inicio-app">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow" data-inicio-fecha></p>
+            <h1 data-inicio-saludo>Hola 👋</h1>
+            <p class="page-subtitle">Esto es lo que tienes por delante.</p>
         </div>
-        <br>
-        <div class="countdown">
-            Cuenta atrás para
+        <div class="page-actions">
+            <a class="btn btn-soft" href="/calendar">Abrir calendario</a>
+            <a class="btn btn-primary" href="/tareas">Ver tareas</a>
         </div>
-        <div></div>
-        <div></div>
-        <div></div>
-    </body>
-</html>
+    </header>
+
+    <section class="stats" aria-label="Resumen">
+        <a class="stat" href="/tareas">
+            <span class="stat-label">Tareas pendientes</span>
+            <strong class="stat-value" data-stat-pendientes>–</strong>
+        </a>
+        <a class="stat stat-danger" href="/calendar">
+            <span class="stat-label">Atrasadas</span>
+            <strong class="stat-value" data-stat-atrasadas>–</strong>
+        </a>
+        <a class="stat stat-info" href="/calendar">
+            <span class="stat-label">Eventos esta semana</span>
+            <strong class="stat-value" data-stat-eventos>–</strong>
+        </a>
+        <a class="stat stat-accent" href="/recordatorios">
+            <span class="stat-label">Recordatorios</span>
+            <strong class="stat-value" data-stat-recordatorios>–</strong>
+        </a>
+    </section>
+
+    <div class="home-grid">
+        <section class="card">
+            <div class="card-header">
+                <h2 class="card-title">Hoy</h2>
+            </div>
+            <ul class="timeline" data-inicio-hoy><li class="empty-state">Cargando…</li></ul>
+        </section>
+
+        <section class="card">
+            <div class="card-header">
+                <h2 class="card-title">Próximos 7 días</h2>
+                <a class="card-link" href="/calendar">Ver calendario →</a>
+            </div>
+            <ul class="timeline" data-inicio-proximos><li class="empty-state">Cargando…</li></ul>
+        </section>
+
+        <section class="card">
+            <div class="card-header">
+                <h2 class="card-title">Tareas sin fecha</h2>
+                <a class="card-link" href="/tareas">Ver todas →</a>
+            </div>
+            <ul class="timeline" data-inicio-sinfecha><li class="empty-state">Cargando…</li></ul>
+        </section>
+
+        <section class="card card-tips">
+            <div class="card-header">
+                <h2 class="card-title">Pídeselo al bot</h2>
+            </div>
+            <p class="card-text">Escribe o manda una nota de voz por Telegram o WhatsApp:</p>
+            <ul class="tips">
+                <li>«Apunta entregar la práctica el viernes a las 14, importancia alta»</li>
+                <li>«Recuérdame mañana a las 10 que tengo dentista»</li>
+                <li>«Resérvame el jueves de 17 a 19 para estudiar»</li>
+                <li>«¿Qué tengo esta semana?»</li>
+            </ul>
+        </section>
+    </div>
+</div>
+{% endblock %}

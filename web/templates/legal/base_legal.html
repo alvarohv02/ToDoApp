@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{% block titulo %}{% endblock %} · Mi Notion</title>
+        <link rel="icon" href="{{ url_for('static', filename='img/Logo_Notas.ico') }}">
+        <style>
+            :root { color-scheme: light dark; --texto: #1b1f2e; --suave: #636b84; --fondo: #f5f6fa; --tarjeta: #fff; --borde: #e3e6ee; --acento: #5b5bd6; }
+            @media (prefers-color-scheme: dark) {
+                :root { --texto: #e7e9f2; --suave: #9aa1b9; --fondo: #0e1016; --tarjeta: #171a23; --borde: #262b3a; --acento: #8e8ff7; }
+            }
+            body { margin: 0; background: var(--fondo); color: var(--texto); font: 16px/1.6 "Segoe UI", system-ui, sans-serif; }
+            main { max-width: 720px; margin: 3rem auto; padding: 2rem; background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 16px; }
+            h1 { margin-top: 0; letter-spacing: -0.02em; }
+            h2 { margin-top: 1.8rem; font-size: 1.15rem; }
+            p, li { color: var(--suave); }
+            a { color: var(--acento); }
+            footer { margin-top: 2rem; font-size: 0.85rem; color: var(--suave); }
+            @media (max-width: 760px) { main { margin: 0; border-radius: 0; border: none; } }
+        </style>
+    </head>
+    <body>
+        <main>
+            {% block contenido %}{% endblock %}
+            <footer><a href="/legal/">Mi Notion</a> · <a href="/legal/privacidad">Política de privacidad</a></footer>
+        </main>
+    </body>
+</html>

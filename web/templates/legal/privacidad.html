@@ -1,0 +1,35 @@
+{% extends 'legal/base_legal.html' %}
+{% block titulo %}Política de privacidad{% endblock %}
+{% block contenido %}
+<h1>Política de privacidad</h1>
+<p>Última actualización: noviembre de 2026.</p>
+
+<p>Mi Notion es una aplicación de uso personal. Esta política explica qué datos maneja y cómo.</p>
+
+<h2>Qué datos se tratan</h2>
+<ul>
+    <li>Las tareas, eventos y recordatorios que el usuario crea en la aplicación.</li>
+    <li>Si se activa la integración con Google Calendar: los eventos del calendario «Mi Notion» que la propia
+        aplicación crea en la cuenta de Google del usuario. La aplicación usa el permiso
+        <code>calendar.app.created</code>, que solo da acceso a los calendarios creados por ella;
+        no puede ver ni modificar ningún otro calendario, correo ni dato de la cuenta de Google.</li>
+</ul>
+
+<h2>Para qué se usan</h2>
+<p>Únicamente para mostrar y sincronizar la agenda del propio usuario entre la aplicación y su Google Calendar.
+No se usan con fines publicitarios, no se analizan con fines comerciales y no se venden ni se ceden a terceros.</p>
+
+<h2>Dónde se guardan</h2>
+<p>En un servidor privado del propietario. Los datos de Google Calendar quedan, además, en la propia cuenta de
+Google del usuario. El acceso a Google se guarda como un token en ese servidor y puede revocarse en cualquier
+momento desde <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
+
+<h2>Uso de datos de Google</h2>
+<p>El uso que Mi Notion hace de la información recibida de las APIs de Google cumple la
+<a href="https://developers.google.com/terms/api-services-user-data-policy">Política de datos de usuario de los servicios de API de Google</a>,
+incluidos los requisitos de uso limitado.</p>
+
+<h2>Borrado</h2>
+<p>Al revocar el acceso o eliminar el calendario «Mi Notion» de Google, la aplicación deja de sincronizar.
+Los datos de la aplicación pueden borrarse en cualquier momento a petición del usuario.</p>
+{% endblock %}

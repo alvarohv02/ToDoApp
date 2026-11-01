@@ -1,140 +1,196 @@
-<!DOCTYPE html>
-<html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="description" content="Ejemplo de HTML5">
-        <meta name="keywords" content="HTML5, CSS3, JavaScript">
-        <title>Notas y Recordatorios</title>
-        <link rel="shortcut icon" href="../static/img/Logo_Notas.ico" />
-        <link rel="stylesheet" href="../static/css/style_tareas.css">
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    </head>
-    <body>
-  <div id="app">
-    <div class="toolbar">
-      <nav class="nav_bar">
-            <div class="logo">
-                <a href="/">
-                    <img class="logo_inicio" src="../static/img/Logo_Notas.png" alt="Logo_Notas">
-                </a>
-            </div>
-            <div class="elemento_nav">
-                <a class="boton_nav" href="/">Inicio</a>
-            </div>
-            <div class="elemento_nav">
-                <a class="boton_nav" href="/tareas">Tareas</a>
-            </div>
-            <div class="elemento_nav">
-                <a class="boton_nav" href="/calendar">Calendario</a>
-            </div>
-        </nav>
-      <div>
-        <button @click="vista='tablero'">Tablero</button>
-        <button @click="vista='tabla'">Tabla</button>
-        <button @click="mostrarFormulario = !mostrarFormulario">➕</button>
-      </div>
-    </div>
+{% extends 'base.html' %}
+{% block titulo %}Tareas{% endblock %}
+{% block cabecera %}
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+{% endblock %}
 
-    <div v-if="mostrarFormulario" class="form">
-      <input v-model="nuevaTarea.nombre" placeholder="Nombre de la tarea">
-      <select v-model="nuevaTarea.importancia">
-        <option disabled value="">Importancia</option>
-        <option>Alta</option>
-        <option>Media</option>
-        <option>Baja</option>
-      </select>
-      <input type="date" v-model="nuevaTarea.fecha_limite">
-      <input v-model="nuevaTarea.persona" placeholder="Persona encargada">
-      <button @click="agregarTarea">Añadir</button>
-    </div>
-
-    <div v-if="vista==='tablero'" class="board">
-      <div class="column" v-for="estado in ['Sin Empezar','En Curso','Terminado']" :key="estado.replace(/\s+/g, '-')" :key="estado"
-           @dragover.prevent="dragOver(estado, $event)"
-           @drop="drop(estado)">
-        <h3 v-text="estado"></h3>
-        <div class="task" v-for="(tarea, i) in tareas.filter(t=>t.status===estado)" :key="tarea.nombre"
-             draggable="true"
-             @dragstart="dragStart(tarea)"
-             @dragend="dragEnd">
-          <span v-text="tarea.nombre"></span>
-          <button class="delete" @click="eliminarTarea(i, estado)">❌</button>
+{% block contenido %}
+{% raw %}
+<div class="page" id="app">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Espacio de trabajo</p>
+            <h1>Tareas</h1>
+            <p class="page-subtitle">Arrastra las tarjetas entre columnas para cambiar su estado.</p>
         </div>
-      </div>
-    </div>
+        <div class="page-actions">
+            <div class="segmented" role="group" aria-label="Vista">
+                <button type="button" class="view-btn" :class="{ active: vista === 'tablero' }" @click="vista = 'tablero'">Tablero</button>
+                <button type="button" class="view-btn" :class="{ active: vista === 'tabla' }" @click="vista = 'tabla'">Tabla</button>
+            </div>
+            <button type="button" class="btn btn-primary" @click="mostrarFormulario = !mostrarFormulario">
+                {{ mostrarFormulario ? 'Cerrar' : '+ Nueva tarea' }}
+            </button>
+        </div>
+    </header>
 
-    <div v-else>
-      <table>
-        <thead>
-          <tr>
-            <th>Nombre</th>
-            <th>Importancia</th>
-            <th>Status</th>
-            <th>Fecha de creación</th>
-            <th>Fecha Límite</th>
-            <th>Persona</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(tarea, i) in tareas" :key="tarea.nombre">
-            <td v-text="tarea.nombre"></td>
-            <td v-text="tarea.importancia"></td>
-            <td><span :class="'status '+tarea.status" v-text="tarea.status"></span></td>
-            <td v-text="tarea.fecha"></td>
-            <td v-text="formatearFecha(tarea.fecha_limite)"></td>
-            <td v-text="tarea.persona"></td>
-            <td class="acciones">
-              <div class="menu-wrapper">
-                <button class="menu-btn" @click="toggleMenu(i)">⋮</button>
-                <div v-if="menuAbierto === i" class="menu-panel">
-                  <button @click="abrirModal(tarea, i)">Modificar</button>
-                  <div v-if="mostrarModal" class="modal-overlay">
-                    <div class="modal">
-                      <h3>Modificando tarea: {{ "{{ tarea.nombre}}" }} </h3>
-                      <label>
-                        Persona encargada:
-                        <input type="text" v-model="tareaEditando.persona" />
-                      </label>
-                      <label>
-                        Importancia:
-                        <select v-model="tareaEditando.importancia">
-                          <option>Alta</option>
-                          <option>Media</option>
-                          <option>Baja</option>
-                        </select>
-                      </label>
-                      <label>
-                        Status:
-                        <select v-model="tareaEditando.status">
-                          <option>Sin Empezar</option>
-                          <option>En Curso</option>
-                          <option>Terminado</option>
-                        </select>
-                      </label>
-                      <label>
-                        Fecha límite:
-                        <input type="date" v-model="tareaEditando.fecha_limite" />
-                      </label>                      
-                      <div class="modal-actions">
-                        <button @click="guardarEdicion">Guardar</button>
-                        <button @click="cerrarModal">Cancelar</button>
-                      </div>
+    <section class="stats stats-compact" aria-label="Resumen de tareas">
+        <div class="stat">
+            <span class="stat-label">Total</span>
+            <strong class="stat-value">{{ tareas.length }}</strong>
+        </div>
+        <div class="stat stat-warning">
+            <span class="stat-label">Sin empezar</span>
+            <strong class="stat-value">{{ tareas.filter(t => t.status === 'Sin Empezar').length }}</strong>
+        </div>
+        <div class="stat stat-info">
+            <span class="stat-label">En curso</span>
+            <strong class="stat-value">{{ tareas.filter(t => t.status === 'En Curso').length }}</strong>
+        </div>
+        <div class="stat stat-success">
+            <span class="stat-label">Terminadas</span>
+            <strong class="stat-value">{{ tareas.filter(t => t.status === 'Terminado').length }}</strong>
+        </div>
+    </section>
+
+    <p v-if="errorCarga" class="alert" v-text="errorCarga"></p>
+
+    <form v-if="mostrarFormulario" class="card task-form" @submit.prevent="agregarTarea">
+        <label class="field field-wide">
+            <span>Nombre</span>
+            <input class="input" v-model="nuevaTarea.nombre" placeholder="¿Qué hay que hacer?" required>
+        </label>
+        <label class="field">
+            <span>Importancia</span>
+            <select class="input" v-model="nuevaTarea.importancia" required>
+                <option disabled value="">Elige…</option>
+                <option>Alta</option>
+                <option>Media</option>
+                <option>Baja</option>
+            </select>
+        </label>
+        <label class="field">
+            <span>Fecha límite</span>
+            <input class="input" type="date" v-model="nuevaTarea.fecha_limite">
+        </label>
+        <label class="field">
+            <span>Hora</span>
+            <input class="input" type="time" v-model="nuevaTarea.hora_limite" :disabled="!nuevaTarea.fecha_limite"
+                   title="Hora límite (opcional, requiere fecha)">
+        </label>
+        <label class="field">
+            <span>Persona</span>
+            <input class="input" v-model="nuevaTarea.persona" :placeholder="personaDefecto">
+        </label>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Añadir tarea</button>
+        </div>
+    </form>
+
+    <div v-if="vista === 'tablero'" class="board">
+        <section class="column" v-for="estado in ['Sin Empezar', 'En Curso', 'Terminado']"
+                 :key="estado.replace(/\s+/g, '-')"
+                 :class="'column-' + estado.toLowerCase().replace(/\s+/g, '-')"
+                 @dragover.prevent="dragOver(estado, $event)"
+                 @dragleave="$event.currentTarget.classList.remove('highlight')"
+                 @drop="drop(estado)">
+            <header class="column-header">
+                <h2 class="column-title"><span class="column-dot"></span>{{ estado }}</h2>
+                <span class="column-count">{{ tareas.filter(t => t.status === estado).length }}</span>
+            </header>
+            <article class="task" v-for="(tarea, i) in tareas.filter(t => t.status === estado)"
+                     :key="tarea.id || tarea.nombre || i"
+                     draggable="true" @dragstart="dragStart(tarea)" @dragend="dragEnd">
+                <div class="task-main">
+                    <span class="task-title" v-text="tarea.nombre"></span>
+                    <div class="task-tags">
+                        <span class="pill" :class="'imp-' + (tarea.importancia || '').toLowerCase()" v-text="tarea.importancia"></span>
+                        <span v-if="tarea.fecha_limite" class="task-date"
+                              v-text="'📅 ' + formatearFecha(tarea.fecha_limite) + (tarea.hora_limite ? ' · ' + tarea.hora_limite : '')"></span>
+                        <span v-if="!esPersonaDefecto(tarea.persona)" class="task-meta" v-text="'👤 ' + tarea.persona"></span>
                     </div>
-                  </div>
-                  <button @click="eliminarTareaTabla(i)">Borrar</button>
                 </div>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+                <button type="button" class="icon-btn delete" title="Borrar tarea" @click="eliminarTarea(i, estado)">✕</button>
+            </article>
+            <p v-if="!tareas.some(t => t.status === estado)" class="column-empty">Suelta aquí una tarea</p>
+        </section>
     </div>
-  </div>
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-</body>
 
+    <div v-else class="card table-shell">
+        <table>
+            <thead>
+                <tr>
+                    <th v-for="[campo, texto] in [['nombre', 'Nombre'], ['importancia', 'Importancia'], ['status', 'Estado'], ['fecha', 'Creada'], ['fecha_limite', 'Fecha límite'], ['persona', 'Persona']]"
+                        :key="campo" :aria-sort="ariaOrden(campo)">
+                        <button type="button" class="th-orden" :class="{ 'is-activo': orden.campo === campo }"
+                                @click="ordenarPor(campo)" :title="tituloOrden(campo)">
+                            {{ texto }} <span class="orden-flecha" v-text="flechaOrden(campo)"></span>
+                        </button>
+                    </th>
+                    <th class="col-acciones"><span class="visually-hidden">Acciones</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr v-for="(tarea, i) in tareasOrdenadas" :key="tarea.id || tarea.nombre || i">
+                    <td class="cell-title" v-text="tarea.nombre"></td>
+                    <td><span class="pill" :class="'imp-' + (tarea.importancia || '').toLowerCase()" v-text="tarea.importancia"></span></td>
+                    <td><span class="pill" :class="'status-' + tarea.status.toLowerCase().replace(/\s+/g, '-')" v-text="tarea.status"></span></td>
+                    <td class="cell-muted" v-text="tarea.fecha"></td>
+                    <td v-text="formatearFecha(tarea.fecha_limite) + (tarea.hora_limite ? ' · ' + tarea.hora_limite : '')"
+                        :class="{ 'cell-muted': !tarea.fecha_limite }"></td>
+                    <td :class="{ 'cell-muted': esPersonaDefecto(tarea.persona) }" v-text="tarea.persona"></td>
+                    <td class="acciones">
+                        <div class="menu-wrapper">
+                            <button type="button" class="icon-btn menu-btn" title="Acciones" @click="toggleMenu(tarea.id)">⋮</button>
+                            <div v-if="menuAbierto === tarea.id" class="menu-panel">
+                                <button type="button" @click="abrirModal(tarea, tarea.id); menuAbierto = null">✏️ Modificar</button>
+                                <button type="button" class="menu-danger" @click="eliminarTareaTabla(tarea)">🗑️ Borrar</button>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                <tr v-if="!tareas.length">
+                    <td colspan="7" class="empty-state">No hay tareas todavía. Pulsa «+ Nueva tarea» o pídeselo al bot.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
 
-</html>
+    <div v-if="mostrarModal && tareaEditando" class="modal-overlay" @click.self="cerrarModal">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="titulo-modal">
+            <h2 id="titulo-modal">Modificar tarea</h2>
+            <label class="field">
+                <span>Nombre</span>
+                <input class="input" type="text" v-model="tareaEditando.nombre">
+            </label>
+            <div class="field-row">
+                <label class="field">
+                    <span>Importancia</span>
+                    <select class="input" v-model="tareaEditando.importancia">
+                        <option>Alta</option>
+                        <option>Media</option>
+                        <option>Baja</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Estado</span>
+                    <select class="input" v-model="tareaEditando.status">
+                        <option>Sin Empezar</option>
+                        <option>En Curso</option>
+                        <option>Terminado</option>
+                    </select>
+                </label>
+            </div>
+            <div class="field-row">
+                <label class="field">
+                    <span>Fecha límite</span>
+                    <input class="input" type="date" v-model="tareaEditando.fecha_limite">
+                </label>
+                <label class="field">
+                    <span>Hora</span>
+                    <input class="input" type="time" v-model="tareaEditando.hora_limite" :disabled="!tareaEditando.fecha_limite">
+                </label>
+            </div>
+            <label class="field">
+                <span>Persona encargada</span>
+                <input class="input" type="text" v-model="tareaEditando.persona">
+            </label>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost" @click="cerrarModal">Cancelar</button>
+                <button type="button" class="btn btn-primary" @click="guardarEdicion">Guardar cambios</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endraw %}
+{% endblock %}
