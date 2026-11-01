@@ -1,0 +1,14 @@
+.env
+.env.*
+.git
+.gitignore
+.vscode
+venv
+data
+web/data
+**/__pycache__
+**/*.pyc
+pruebas.html
+deploy
+Dockerfile
+docker-compose.yml
