@@ -1,0 +1,22 @@
+services:
+  notion:
+    build: .
+    image: notion-bot
+    container_name: notion-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Europe/Madrid
+    # Solo accesible desde el propio servidor: nginx publica /webhook/ hacia fuera
+    ports:
+      - "127.0.0.1:5000:5000"
+    # La base de datos vive fuera del contenedor para no perderla al actualizar
+    volumes:
+      - ./data:/app/web/data
+    # El servidor tiene 2 GB de RAM; la app usa ~60 MB y el modelo de voz ~200 MB más al recibir un audio
+    mem_limit: 640m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
