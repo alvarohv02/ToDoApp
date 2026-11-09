@@ -262,18 +262,22 @@ en 1-2 minutos. La app solo tiene permiso sobre los calendarios que crea ella, n
 
 ```powershell
 cd C:\Users\alvar\Desktop\vs\Proy_Notion
-python deploy\autorizar_google.py TU_ID_DE_CLIENTE TU_SECRETO_DE_CLIENTE
+python deploy\autorizar_google.py
 ```
 
-Se abre el navegador: entra con tu cuenta, acepta el aviso de "app no verificada"
-(*Configuración avanzada → Ir a Mi Notion*) y da permiso. El script imprime tres líneas `GOOGLE_...`.
+Te pide el ID y el secreto de cliente (el secreto no se ve al escribirlo). Se abre el navegador:
+entra con tu cuenta, acepta el aviso de "app no verificada" (*Configuración avanzada → Ir a Mi Notion*)
+y da permiso. Las tres líneas `GOOGLE_...` quedan en el archivo `.env.google` de la carpeta del
+proyecto (no se muestran en pantalla, y git lo ignora).
 
 ### 3. Añadirlas al servidor [admin]
 
 ```bash
-sudo nano /opt/notion/.env          # pega las tres líneas GOOGLE_... al final y guarda
+sudo nano /opt/notion/.env          # pega las tres líneas de .env.google al final y guarda
 sudo machinectl shell notion_bot@ /bin/bash -c 'export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock; cd /opt/notion && docker compose up -d --force-recreate'
 ```
+
+Después borra `.env.google` de tu PC: ya no hace falta.
 
 En 1-2 minutos aparecen en Google seis calendarios, uno por tipo y con el color de la web:
 "Mi Notion · Clases", "· Cumpleaños", "· Reuniones", "· Exámenes", "· Otros" y "· Tareas"
