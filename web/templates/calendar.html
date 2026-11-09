@@ -56,11 +56,15 @@
                 <span>Fecha</span>
                 <input class="input" type="date" name="fecha" required>
             </label>
-            <label class="field">
+            <div class="field">
+                <span>Horario</span>
+                <label class="input check-todo-dia"><input type="checkbox" name="todo_dia"> Todo el día</label>
+            </div>
+            <label class="field" data-event-hora>
                 <span>Hora de inicio</span>
                 <input class="input" type="time" name="hora_inicio">
             </label>
-            <label class="field">
+            <label class="field" data-event-hora>
                 <span>Hora de fin</span>
                 <input class="input" type="time" name="hora_fin">
             </label>

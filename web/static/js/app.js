@@ -204,6 +204,7 @@ async function renderizarCalendario() {
   const textoSoloEste = calendarRoot.querySelector('[data-alcance-uno]');
   const opcionSiguientes = calendarRoot.querySelector('[data-alcance-siguientes]');
   const campoRepeticion = form.elements.repeticion.closest('.field');
+  const camposHora = [...calendarRoot.querySelectorAll('[data-event-hora]')];
   let eventoEditando = null;
   // Día pulsado de un evento que se repite (null si no se repite o es nuevo)
   let ocurrencia = null;
@@ -223,6 +224,11 @@ async function renderizarCalendario() {
 
   function actualizarCampoHasta() {
     campoHasta.hidden = !REPETICIONES_CON_FIN.includes(form.elements.repeticion.value);
+  }
+
+  // "Todo el día" oculta las horas (en el móvil, un campo de hora no se puede dejar vacío fácilmente)
+  function actualizarTodoDia() {
+    camposHora.forEach((campo) => { campo.hidden = form.elements.todo_dia.checked; });
   }
 
   // En un evento que se repite: "solo este día", "este y los siguientes" o "toda la serie"
@@ -282,6 +288,8 @@ async function renderizarCalendario() {
     form.elements.fecha.value = datos.fecha_inicio || datos.fecha || claveFecha(new Date());
     form.elements.hora_inicio.value = datos.hora_inicio || '';
     form.elements.hora_fin.value = datos.hora_fin || '';
+    form.elements.todo_dia.checked = Boolean(eventoEditando) && !datos.hora_inicio;
+    actualizarTodoDia();
     form.elements.repeticion.value = datos.repeticion || '';
     form.elements.hasta.value = datos.hasta || '';
     aplicarAlcance();
@@ -309,6 +317,14 @@ async function renderizarCalendario() {
   }
 
   form.elements.repeticion.addEventListener('change', actualizarCampoHasta);
+  form.elements.todo_dia.addEventListener('change', actualizarTodoDia);
+  // Un cumpleaños nuevo suele ser de todo el día
+  form.elements.categoria.addEventListener('change', () => {
+    if (!eventoEditando && form.elements.categoria.value === 'Cumpleaños' && !form.elements.hora_inicio.value) {
+      form.elements.todo_dia.checked = true;
+      actualizarTodoDia();
+    }
+  });
   bloqueAlcance.addEventListener('change', aplicarAlcance);
   calendarRoot.querySelector('[data-event-new]').addEventListener('click', () => abrirFormulario(null));
   calendarRoot.querySelector('[data-event-close]').addEventListener('click', cerrarFormulario);
@@ -316,6 +332,11 @@ async function renderizarCalendario() {
   form.addEventListener('submit', async (envio) => {
     envio.preventDefault();
     const datos = Object.fromEntries(new FormData(form).entries());
+    delete datos.todo_dia;
+    if (form.elements.todo_dia.checked) {
+      datos.hora_inicio = '';
+      datos.hora_fin = '';
+    }
     try {
       if (eventoEditando) {
         await enviarEvento('PUT', urlEvento(), datos);
