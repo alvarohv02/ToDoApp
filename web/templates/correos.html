@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block titulo %}Correos{% endblock %}
+
+{% block contenido %}
+<div class="page" id="correos-app">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Bandeja de entrada</p>
+            <h1>Correos no leídos</h1>
+            <p class="page-subtitle" data-correos-subtitulo>Todas tus cuentas en un sitio.</p>
+        </div>
+        <div class="page-actions">
+            <button type="button" class="btn btn-soft" data-correos-actualizar>↻ Actualizar</button>
+        </div>
+    </header>
+
+    <div class="correos-cuentas" data-correos-cuentas></div>
+    <ul class="correos-errores" data-correos-errores hidden></ul>
+
+    <div class="correos-layout">
+        <section class="card">
+            <ul class="correo-lista" data-correos-lista><li class="empty-state">Cargando…</li></ul>
+        </section>
+
+        <section class="card correo-detalle" data-correo-detalle hidden>
+            <div class="card-header">
+                <div class="correo-detalle-cabecera">
+                    <h2 class="card-title" data-correo-asunto></h2>
+                    <p class="card-text" data-correo-de></p>
+                    <p class="card-text correo-detalle-meta" data-correo-meta></p>
+                </div>
+                <button type="button" class="btn btn-soft btn-icono" data-correo-cerrar title="Cerrar">✕</button>
+            </div>
+            <div class="correo-acciones">
+                <button type="button" class="btn btn-soft" data-correo-accion="leido">✓ Marcar como leído</button>
+                <button type="button" class="btn btn-soft" data-correo-accion="archivar">🗄️ Archivar</button>
+                <button type="button" class="btn btn-danger" data-correo-accion="borrar">🗑️ Borrar</button>
+            </div>
+            <p class="event-form-error" data-correo-error></p>
+            <div class="correo-texto" data-correo-texto></div>
+        </section>
+    </div>
+</div>
+{% endblock %}

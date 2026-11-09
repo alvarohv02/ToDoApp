@@ -26,6 +26,7 @@ COMANDOS = {
     '/sinfecha': ('tareas sin fecha', 'Tareas sin fecha límite'),
     '/atrasadas': ('tareas atrasadas', 'Tareas con la fecha pasada'),
     '/recordatorios': ('mis recordatorios', 'Recordatorios pendientes'),
+    '/correos': ('correos', 'Correos sin leer'),
     '/deshacer': ('deshaz', 'Deshacer lo último que hice'),
 }
 

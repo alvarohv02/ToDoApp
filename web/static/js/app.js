@@ -1119,10 +1119,7 @@ function crearTarjetaRecordatorio(recordatorio, alCambiar) {
   inputTexto.setAttribute('aria-label', 'Texto del recordatorio');
   const meta = crearElemento('div', 'reminder-meta');
   const etiquetasEstado = { pendiente: 'Pendiente', enviado: 'Enviado', error: 'No se pudo enviar' };
-  meta.append(
-    crearElemento('span', `reminder-chip estado-${recordatorio.estado}`, etiquetasEstado[recordatorio.estado]),
-    crearElemento('span', 'reminder-chip', recordatorio.canal)
-  );
+  meta.append(crearElemento('span', `reminder-chip estado-${recordatorio.estado}`, etiquetasEstado[recordatorio.estado]));
   columnaTexto.append(inputTexto, meta);
 
   const inputFecha = crearElemento('input');
@@ -1250,32 +1247,37 @@ function iniciarTema() {
   });
 }
 
-// --- Inicio: resumen de hoy y de los próximos días --------------------------------
+// --- Inicio: el panel del día ---------------------------------------------------------------
 
-function elementoLinea(cuando, texto, tipo, claseExtra = '') {
-  const li = document.createElement('li');
-  li.className = `timeline-item tipo-${tipo} ${claseExtra}`.trim();
-  const momento = document.createElement('span');
-  momento.className = 'timeline-when';
-  momento.textContent = cuando;
-  const titulo = document.createElement('span');
-  titulo.className = 'timeline-text';
-  titulo.textContent = texto;
-  titulo.title = texto;
-  const etiqueta = document.createElement('span');
-  etiqueta.className = 'timeline-tipo';
-  etiqueta.textContent = { evento: 'Evento', tarea: 'Tarea', recordatorio: 'Aviso', atrasada: 'Atrasada' }[tipo];
-  li.append(momento, titulo, etiqueta);
-  return li;
+const API_CORREOS_URL = '/api/correos';
+const COLOR_CATEGORIA = {
+  Clase: 'var(--info)', Cumpleaños: 'var(--pink)', Reunión: 'var(--teal)', Examen: 'var(--danger)', Otro: 'var(--gris)'
+};
+
+// True si esa fecha (y hora, si la hay) ya ha pasado
+function pasoYa(fecha, hora) {
+  const ahora = new Date();
+  const hoy = claveFecha(ahora);
+  const horaActual = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
+  return fecha < hoy || (fecha === hoy && Boolean(hora) && hora <= horaActual);
+}
+
+function crear(etiqueta, clase, texto) {
+  const el = document.createElement(etiqueta);
+  if (clase) {
+    el.className = clase;
+  }
+  if (texto !== undefined) {
+    el.textContent = texto;
+  }
+  return el;
 }
 
 function rellenarLista(lista, elementos, vacio) {
   if (!lista) {
     return;
   }
-  lista.replaceChildren(...(elementos.length ? elementos : [Object.assign(document.createElement('li'), {
-    className: 'empty-state', textContent: vacio
-  })]));
+  lista.replaceChildren(...(elementos.length ? elementos : [crear('li', 'empty-state', vacio)]));
 }
 
 function diaCorto(clave, hoyClave) {
@@ -1284,6 +1286,127 @@ function diaCorto(clave, hoyClave) {
   }
   const fecha = new Date(`${clave}T00:00`);
   return fecha.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric' });
+}
+
+function sumarDias(fecha, dias) {
+  const nueva = new Date(fecha);
+  nueva.setDate(nueva.getDate() + dias);
+  return nueva;
+}
+
+// Etiqueta de vencimiento de una tarea: Atrasada, Hoy, Mañana o la fecha
+function vencimiento(tarea, hoyClave) {
+  if (!tarea.fecha_limite) {
+    return { texto: 'Sin fecha', clase: 'vence-sin' };
+  }
+  if (tarea.fecha_limite < hoyClave) {
+    return { texto: 'Atrasada', clase: 'vence-atrasada' };
+  }
+  if (tarea.fecha_limite === hoyClave) {
+    return { texto: tarea.hora_limite ? `Hoy ${tarea.hora_limite}` : 'Hoy', clase: 'vence-hoy' };
+  }
+  if (tarea.fecha_limite === claveFecha(sumarDias(new Date(), 1))) {
+    return { texto: 'Mañana', clase: 'vence-manana' };
+  }
+  return { texto: diaCorto(tarea.fecha_limite, hoyClave), clase: 'vence-luego' };
+}
+
+function ordenarPorFecha(a, b) {
+  return (a.fecha_limite || '9999').localeCompare(b.fecha_limite || '9999')
+    || (a.hora_limite || '99').localeCompare(b.hora_limite || '99');
+}
+
+// Fila con casilla: al marcarla, la tarea pasa a Terminado
+function filaTarea(tarea, hoyClave, alTerminar) {
+  const li = crear('li', `check-item imp-${(tarea.importancia || '').toLowerCase()}`);
+  const etiqueta = crear('label', 'check-label');
+  const casilla = crear('input');
+  casilla.type = 'checkbox';
+  const nombre = crear('span', 'check-texto', tarea.nombre);
+  nombre.title = [tarea.nombre, `Importancia ${tarea.importancia.toLowerCase()}`, tarea.persona].filter(Boolean).join(' · ');
+  etiqueta.append(casilla, nombre);
+  const vence = vencimiento(tarea, hoyClave);
+  li.append(etiqueta, crear('span', `vence ${vence.clase}`, vence.texto));
+
+  casilla.addEventListener('change', async () => {
+    li.classList.toggle('is-hecha', casilla.checked);
+    try {
+      await actualizarTarea({ ...tarea, status: casilla.checked ? 'Terminado' : tarea.status });
+      if (casilla.checked) {
+        setTimeout(alTerminar, 700);
+      }
+    } catch (error) {
+      casilla.checked = false;
+      li.classList.remove('is-hecha');
+      nombre.title = error.message;
+    }
+  });
+  return li;
+}
+
+function filaAgenda(cuando, texto, color, pasado) {
+  const li = crear('li', `hoy-item${pasado ? ' is-pasado' : ''}`);
+  li.style.setProperty('--c', color);
+  li.append(crear('span', 'hoy-punto'), crear('span', 'hoy-hora', cuando), crear('span', 'hoy-texto', texto));
+  li.lastChild.title = texto;
+  return li;
+}
+
+function horaCorreo(fecha, hoyClave) {
+  if (!fecha) {
+    return '';
+  }
+  return fecha.slice(0, 10) === hoyClave ? fecha.slice(11, 16) : formatearFecha(fecha.slice(0, 10)).slice(0, 5);
+}
+
+// Color estable por cuenta de correo
+function colorCuenta(id) {
+  const colores = ['var(--accent)', 'var(--teal)', 'var(--pink)', 'var(--warning)', 'var(--info)', 'var(--success)'];
+  let suma = 0;
+  for (const letra of id) {
+    suma += letra.charCodeAt(0);
+  }
+  return colores[suma % colores.length];
+}
+
+function filaCorreo(correo, hoyClave, variasCuentas) {
+  const li = crear('li', 'correo-item');
+  li.dataset.clave = `${correo.cuenta}/${correo.uid}`;
+  const avatar = crear('span', 'correo-avatar', (correo.de || '?').trim().charAt(0).toUpperCase());
+  avatar.style.setProperty('--c', colorCuenta(correo.cuenta));
+  const cuerpo = crear('span', 'correo-cuerpo');
+  const linea1 = crear('span', 'correo-de', correo.de || correo.direccion);
+  const linea2 = crear('span', 'correo-asunto', correo.asunto);
+  cuerpo.append(linea1, linea2);
+  const lado = crear('span', 'correo-lado');
+  lado.append(crear('span', 'correo-hora', horaCorreo(correo.fecha, hoyClave)));
+  if (variasCuentas) {
+    const insignia = crear('span', 'correo-cuenta', correo.cuenta_nombre);
+    insignia.style.setProperty('--c', colorCuenta(correo.cuenta));
+    lado.append(insignia);
+  }
+  li.title = `${correo.de} <${correo.direccion}>\n${correo.asunto}`;
+  li.append(avatar, cuerpo, lado);
+  return li;
+}
+
+async function pedirJson(url, opciones) {
+  const response = await fetch(url, opciones);
+  const datos = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(datos.error || 'No se pudo completar');
+  }
+  return datos;
+}
+
+function chipConexion(icono, nombre, detalle, estado) {
+  const li = crear('li', `conexion conexion-${estado}`);
+  const textos = crear('span', 'conexion-textos');
+  textos.append(crear('span', 'conexion-nombre', nombre), crear('span', 'conexion-detalle', detalle));
+  li.append(crear('span', 'conexion-icono', icono), textos,
+    crear('span', 'conexion-estado', { ok: '●', error: '●', apagado: '○' }[estado]));
+  li.title = detalle;
+  return li;
 }
 
 async function renderizarInicio() {
@@ -1295,62 +1418,255 @@ async function renderizarInicio() {
   const ahora = new Date();
   const hoyClave = claveFecha(ahora);
   const hora = ahora.getHours();
-  raiz.querySelector('[data-inicio-saludo]').textContent =
-    `${hora < 6 ? 'Buenas noches' : hora < 13 ? 'Buenos días' : hora < 21 ? 'Buenas tardes' : 'Buenas noches'} 👋`;
+  const saludo = hora < 6 ? 'Buenas noches' : hora < 13 ? 'Buenos días' : hora < 21 ? 'Buenas tardes' : 'Buenas noches';
+  const nombre = raiz.dataset.nombre;
+  raiz.querySelector('[data-inicio-saludo]').textContent = nombre ? `${saludo}, ${nombre}` : saludo;
+  raiz.querySelector('.panel-sol').textContent = hora >= 6 && hora < 21 ? '☀️' : '🌙';
   const fechaLarga = ahora.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-  raiz.querySelector('[data-inicio-fecha]').textContent = fechaLarga;
+  raiz.querySelector('[data-inicio-fecha]').textContent = fechaLarga.charAt(0).toUpperCase() + fechaLarga.slice(1);
 
-  const enUnaSemana = new Date(ahora);
-  enUnaSemana.setDate(enUnaSemana.getDate() + 6);
-  const [tareas, eventos, recordatorios] = await Promise.all([
+  const [tareas, eventos, recordatorios, correos, conexiones] = await Promise.all([
     cargarTareas(),
-    cargarEventos(hoyClave, claveFecha(enUnaSemana)),
-    fetch(API_REMINDERS_URL).then((r) => (r.ok ? r.json() : [])).catch(() => [])
+    cargarEventos(hoyClave, hoyClave),
+    fetch(API_REMINDERS_URL).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    fetch(API_CORREOS_URL).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetch('/api/conexiones').then((r) => (r.ok ? r.json() : null)).catch(() => null)
   ]);
 
   const pendientes = tareas.filter((t) => t.status !== 'Terminado');
+  const avisosHoy = recordatorios.filter((r) => r.estado === 'pendiente' && r.cuando.startsWith(hoyClave));
+  const recargar = () => renderizarInicio();
+
+  // Agenda de hoy: eventos, avisos y tareas con hora (lo de todo el día, arriba)
+  const agenda = [
+    ...eventos.map((e) => ({
+      orden: e.hora_inicio || '', cuando: e.hora_inicio || 'Todo el día',
+      texto: `${EMOJI_CATEGORIA[e.categoria] || '📌'} ${e.titulo}`,
+      color: COLOR_CATEGORIA[e.categoria] || 'var(--gris)',
+      pasado: pasoYa(e.fecha, e.hora_fin || e.hora_inicio)
+    })),
+    ...avisosHoy.map((r) => ({
+      orden: r.cuando.slice(11, 16), cuando: r.cuando.slice(11, 16), texto: `⏰ ${r.texto}`,
+      color: 'var(--accent)', pasado: pasoYa(hoyClave, r.cuando.slice(11, 16))
+    })),
+    ...pendientes.filter((t) => t.fecha_limite === hoyClave && t.hora_limite).map((t) => ({
+      orden: t.hora_limite, cuando: t.hora_limite, texto: `✅ ${t.nombre}`, color: 'var(--warning)',
+      pasado: pasoYa(hoyClave, t.hora_limite)
+    }))
+  ].sort((a, b) => a.orden.localeCompare(b.orden));
+  rellenarLista(raiz.querySelector('[data-inicio-hoy]'),
+    agenda.map((a) => filaAgenda(a.cuando, a.texto, a.color, a.pasado)), 'Nada programado hoy. ¡Día libre! 🎉');
+
+  // Prioridades: importancia alta; Tareas pendientes: el resto, por fecha
+  const prioridades = pendientes.filter((t) => t.importancia === 'Alta').sort(ordenarPorFecha);
+  const resto = pendientes.filter((t) => t.importancia !== 'Alta').sort(ordenarPorFecha);
+  rellenarLista(raiz.querySelector('[data-inicio-prioridades]'),
+    prioridades.slice(0, 6).map((t) => filaTarea(t, hoyClave, recargar)), 'Ninguna tarea de importancia alta 👌');
+  rellenarLista(raiz.querySelector('[data-inicio-pendientes]'),
+    resto.slice(0, 6).map((t) => filaTarea(t, hoyClave, recargar)), 'No tienes más tareas pendientes 🎉');
+
+  // Correos no leídos
+  const listaCorreos = raiz.querySelector('[data-inicio-correos]');
+  const cuentas = correos ? correos.cuentas : [];
+  const totalCorreos = cuentas.reduce((suma, c) => suma + c.no_leidos, 0);
+  raiz.querySelector('[data-inicio-correos-enlace]').textContent = totalCorreos ? `Ver todos (${totalCorreos}) →` : 'Ver todos →';
+  if (!cuentas.length) {
+    rellenarLista(listaCorreos, [], 'Aún no hay cuentas de correo conectadas (ver deploy/INSTALAR.md).');
+  } else {
+    const filas = correos.correos.slice(0, 5).map((c) => {
+      const fila = filaCorreo(c, hoyClave, cuentas.length > 1);
+      fila.addEventListener('click', () => { window.location.href = `/correos#${c.cuenta}/${c.uid}`; });
+      return fila;
+    });
+    const errores = cuentas.filter((c) => c.error).map((c) => crear('li', 'empty-state correo-error', `⚠️ ${c.nombre}: ${c.error}`));
+    rellenarLista(listaCorreos, [...errores, ...filas], 'Nada sin leer 📭');
+  }
+
+  // Herramientas conectadas
+  if (conexiones) {
+    const google = conexiones.google;
+    const chips = [
+      chipConexion('📅', 'Google Calendar',
+        !google.configurado ? 'Sin conectar' : google.error ? `Error: ${google.error}`
+          : google.ultima ? `Sincronizado ${google.ultima.slice(11, 16)}` : 'Conectado',
+        !google.configurado ? 'apagado' : google.error ? 'error' : 'ok'),
+      ...conexiones.correos.map((c) => chipConexion('📧', c.nombre,
+        c.error ? c.error : `${c.usuario} · ${c.no_leidos} sin leer`, c.error ? 'error' : 'ok')),
+      chipConexion('✈️', 'Telegram', conexiones.telegram ? 'Bot activo' : 'Sin conectar', conexiones.telegram ? 'ok' : 'apagado'),
+      chipConexion('💬', 'WhatsApp', conexiones.whatsapp ? 'Bot activo' : 'Sin conectar', conexiones.whatsapp ? 'ok' : 'apagado')
+    ];
+    if (!conexiones.correos.length) {
+      chips.splice(1, 0, chipConexion('📧', 'Correo', 'Sin conectar', 'apagado'));
+    }
+    rellenarLista(raiz.querySelector('[data-inicio-conexiones]'), chips, '');
+  }
+
+  // Resumen del día, hecho con reglas a partir de lo anterior
+  const puntos = [];
+  const eventosQueQuedan = eventos.filter((e) => !pasoYa(e.fecha, e.hora_fin || e.hora_inicio));
+  const siguiente = eventosQueQuedan.find((e) => e.hora_inicio);
+  if (eventos.length) {
+    puntos.push(`Tienes ${eventos.length === 1 ? '1 evento' : `${eventos.length} eventos`} hoy`
+      + (siguiente ? `; el siguiente, «${siguiente.titulo}» a las ${siguiente.hora_inicio}.` : '.'));
+  }
+  const vencenHoy = pendientes.filter((t) => t.fecha_limite === hoyClave);
   const atrasadas = pendientes.filter((t) => t.fecha_limite && t.fecha_limite < hoyClave);
-  const avisos = recordatorios.filter((r) => r.estado === 'pendiente');
+  if (vencenHoy.length) {
+    puntos.push(`${vencenHoy.length === 1 ? '1 tarea vence' : `${vencenHoy.length} tareas vencen`} hoy.`);
+  }
+  if (atrasadas.length) {
+    puntos.push(`⚠️ ${atrasadas.length === 1 ? 'Tienes 1 tarea atrasada' : `Tienes ${atrasadas.length} tareas atrasadas`}.`);
+  }
+  if (prioridades.length) {
+    puntos.push(`${prioridades.length === 1 ? '1 tarea' : `${prioridades.length} tareas`} de importancia alta por hacer.`);
+  }
+  const avisosQuedan = avisosHoy.filter((r) => !pasoYa(hoyClave, r.cuando.slice(11, 16)));
+  if (avisosQuedan.length) {
+    puntos.push(`Te quedan ${avisosQuedan.length === 1 ? '1 recordatorio' : `${avisosQuedan.length} recordatorios`} hoy`
+      + ` (el próximo a las ${avisosQuedan[0].cuando.slice(11, 16)}).`);
+  }
+  if (totalCorreos) {
+    const porCuenta = cuentas.filter((c) => c.no_leidos).map((c) => `${c.nombre} ${c.no_leidos}`).join(', ');
+    puntos.push(`${totalCorreos === 1 ? '1 correo' : `${totalCorreos} correos`} sin leer${cuentas.length > 1 ? ` (${porCuenta})` : ''}.`);
+  }
+  if (!puntos.length) {
+    puntos.push('Día tranquilo: no tienes nada pendiente para hoy 🎉');
+  }
+  rellenarLista(raiz.querySelector('[data-inicio-resumen]'), puntos.map((p) => crear('li', '', p)), '');
+}
 
-  raiz.querySelector('[data-stat-pendientes]').textContent = pendientes.length;
-  raiz.querySelector('[data-stat-atrasadas]').textContent = atrasadas.length;
-  raiz.querySelector('[data-stat-eventos]').textContent = eventos.length;
-  raiz.querySelector('[data-stat-recordatorios]').textContent = avisos.length;
+// --- Correos: todos los no leídos, abrir y ordenar ---------------------------------------
 
-  const claseEvento = (e) => `categoria-${CLASE_CATEGORIA[e.categoria] || 'otro'}`;
-  const emoji = (e) => EMOJI_CATEGORIA[e.categoria] || '📌';
+async function renderizarCorreos() {
+  const raiz = document.querySelector('#correos-app');
+  if (!raiz) {
+    return;
+  }
+  const lista = raiz.querySelector('[data-correos-lista]');
+  const chipsCuentas = raiz.querySelector('[data-correos-cuentas]');
+  const detalle = raiz.querySelector('[data-correo-detalle]');
+  const errorDetalle = raiz.querySelector('[data-correo-error]');
+  const botonActualizar = raiz.querySelector('[data-correos-actualizar]');
+  const hoyClave = claveFecha(new Date());
+  let datos = { cuentas: [], correos: [] };
+  let filtro = null;
+  let abierto = null;
 
-  // Hoy: atrasadas, eventos, tareas que vencen y avisos, por hora
-  const hoy = [
-    ...atrasadas.map((t) => ({ orden: '00:00', el: elementoLinea(formatearFecha(t.fecha_limite).slice(0, 5), t.nombre, 'atrasada') })),
-    ...eventos.filter((e) => e.fecha === hoyClave).map((e) => ({
-      orden: e.hora_inicio || '00:01',
-      el: elementoLinea(e.hora_inicio || 'Todo el día', `${emoji(e)} ${e.titulo}`, 'evento', claseEvento(e))
-    })),
-    ...pendientes.filter((t) => t.fecha_limite === hoyClave).map((t) => ({
-      orden: t.hora_limite || '23:59', el: elementoLinea(t.hora_limite || 'Hoy', t.nombre, 'tarea')
-    })),
-    ...avisos.filter((r) => r.cuando.startsWith(hoyClave)).map((r) => ({
-      orden: r.cuando.slice(11), el: elementoLinea(r.cuando.slice(11), `⏰ ${r.texto}`, 'recordatorio')
-    }))
-  ].sort((a, b) => a.orden.localeCompare(b.orden)).map((x) => x.el);
-  rellenarLista(raiz.querySelector('[data-inicio-hoy]'), hoy, 'Nada para hoy. ¡Día libre! 🎉');
+  function pintar() {
+    const total = datos.cuentas.reduce((suma, c) => suma + c.no_leidos, 0);
+    raiz.querySelector('[data-correos-subtitulo]').textContent = datos.cuentas.length
+      ? `${total === 1 ? '1 correo sin leer' : `${total} correos sin leer`} en ${datos.cuentas.length === 1 ? '1 cuenta' : `${datos.cuentas.length} cuentas`}.`
+      : 'Todavía no hay cuentas conectadas: añádelas en el .env del servidor (ver deploy/INSTALAR.md).';
 
-  // Próximos días (sin hoy), máximo 8
-  const proximos = [
-    ...eventos.filter((e) => e.fecha > hoyClave).map((e) => ({
-      orden: `${e.fecha} ${e.hora_inicio || '00:00'}`,
-      el: elementoLinea(diaCorto(e.fecha, hoyClave), `${emoji(e)} ${e.titulo}`, 'evento', claseEvento(e))
-    })),
-    ...pendientes.filter((t) => t.fecha_limite > hoyClave && t.fecha_limite <= claveFecha(enUnaSemana)).map((t) => ({
-      orden: `${t.fecha_limite} ${t.hora_limite || '23:59'}`, el: elementoLinea(diaCorto(t.fecha_limite, hoyClave), t.nombre, 'tarea')
-    }))
-  ].sort((a, b) => a.orden.localeCompare(b.orden)).slice(0, 8).map((x) => x.el);
-  rellenarLista(raiz.querySelector('[data-inicio-proximos]'), proximos, 'Nada en los próximos 7 días.');
+    const todas = crear('button', `chip-filtro${filtro ? '' : ' is-activo'}`, 'Todas');
+    todas.type = 'button';
+    todas.addEventListener('click', () => { filtro = null; pintar(); });
+    chipsCuentas.replaceChildren(todas, ...datos.cuentas.map((c) => {
+      const chip = crear('button', `chip-filtro${filtro === c.id ? ' is-activo' : ''}${c.error ? ' is-error' : ''}`,
+        c.error ? `⚠️ ${c.nombre}` : `${c.nombre} · ${c.no_leidos}`);
+      chip.type = 'button';
+      chip.style.setProperty('--c', colorCuenta(c.id));
+      chip.title = c.error ? c.error : `${c.usuario}${c.actualizado ? ` · revisado a las ${c.actualizado.slice(11, 16)}` : ''}`;
+      chip.addEventListener('click', () => { filtro = c.id; pintar(); });
+      return chip;
+    }));
 
-  const sinFecha = pendientes.filter((t) => !t.fecha_limite).slice(0, 6).map((t) =>
-    elementoLinea(t.importancia, t.nombre, 'tarea', `imp-${t.importancia.toLowerCase()}`));
-  rellenarLista(raiz.querySelector('[data-inicio-sinfecha]'), sinFecha, 'Ninguna: todas tienen fecha 👌');
+    // Las cuentas que fallan, con el motivo a la vista (no solo al pasar el ratón)
+    const errores = raiz.querySelector('[data-correos-errores]');
+    const conError = datos.cuentas.filter((c) => c.error);
+    errores.hidden = !conError.length;
+    errores.replaceChildren(...conError.map((c) => crear('li', '', `⚠️ ${c.nombre} (${c.usuario}): ${c.error}`)));
+
+    const visibles = datos.correos.filter((c) => !filtro || c.cuenta === filtro);
+    rellenarLista(lista, visibles.map((c) => {
+      const fila = filaCorreo(c, hoyClave, datos.cuentas.length > 1);
+      fila.classList.toggle('is-abierto', abierto === `${c.cuenta}/${c.uid}`);
+      fila.addEventListener('click', () => abrir(c.cuenta, c.uid));
+      return fila;
+    }), datos.cuentas.length ? 'Nada sin leer 📭' : 'Sin cuentas de correo.');
+  }
+
+  async function cargar(actualizar = false) {
+    botonActualizar.disabled = true;
+    try {
+      datos = await pedirJson(actualizar ? `${API_CORREOS_URL}/actualizar` : API_CORREOS_URL,
+        actualizar ? { method: 'POST' } : undefined);
+    } catch (error) {
+      rellenarLista(lista, [], error.message);
+    } finally {
+      botonActualizar.disabled = false;
+    }
+    pintar();
+  }
+
+  async function abrir(cuenta, uid) {
+    abierto = `${cuenta}/${uid}`;
+    history.replaceState(null, '', `#${abierto}`);
+    pintar();
+    detalle.hidden = false;
+    errorDetalle.textContent = '';
+    raiz.querySelector('[data-correo-asunto]').textContent = 'Abriendo…';
+    raiz.querySelector('[data-correo-de]').textContent = '';
+    raiz.querySelector('[data-correo-meta]').textContent = '';
+    raiz.querySelector('[data-correo-texto]').textContent = '';
+    if (window.matchMedia('(max-width: 1080px)').matches) {
+      detalle.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    try {
+      const correo = await pedirJson(`${API_CORREOS_URL}/${cuenta}/${uid}`);
+      if (abierto !== `${cuenta}/${uid}`) {
+        return;
+      }
+      raiz.querySelector('[data-correo-asunto]').textContent = correo.asunto;
+      raiz.querySelector('[data-correo-de]').textContent = `${correo.de} <${correo.direccion}>`;
+      const meta = [correo.cuenta_nombre, correo.fecha && `${formatearFecha(correo.fecha.slice(0, 10))} ${correo.fecha.slice(11, 16)}`,
+        correo.adjuntos.length && `📎 ${correo.adjuntos.join(', ')}`].filter(Boolean).join(' · ');
+      raiz.querySelector('[data-correo-meta]').textContent = meta;
+      raiz.querySelector('[data-correo-texto]').textContent = correo.texto || '(Este correo no tiene texto)';
+    } catch (error) {
+      raiz.querySelector('[data-correo-asunto]').textContent = 'No se pudo abrir';
+      errorDetalle.textContent = error.message;
+    }
+  }
+
+  function cerrar() {
+    abierto = null;
+    detalle.hidden = true;
+    history.replaceState(null, '', window.location.pathname);
+    pintar();
+  }
+
+  raiz.querySelectorAll('[data-correo-accion]').forEach((boton) => {
+    boton.addEventListener('click', async () => {
+      if (!abierto) {
+        return;
+      }
+      const que = boton.dataset.correoAccion;
+      if (que === 'borrar' && !window.confirm('¿Mover este correo a la papelera?')) {
+        return;
+      }
+      const [cuenta, uid] = abierto.split('/');
+      boton.disabled = true;
+      try {
+        await pedirJson(`${API_CORREOS_URL}/${cuenta}/${uid}/${que}`, { method: 'POST' });
+        datos.correos = datos.correos.filter((c) => !(c.cuenta === cuenta && c.uid === uid));
+        datos.cuentas = datos.cuentas.map((c) => (c.id === cuenta ? { ...c, no_leidos: Math.max(0, c.no_leidos - 1) } : c));
+        cerrar();
+      } catch (error) {
+        errorDetalle.textContent = error.message;
+      } finally {
+        boton.disabled = false;
+      }
+    });
+  });
+  raiz.querySelector('[data-correo-cerrar]').addEventListener('click', cerrar);
+  botonActualizar.addEventListener('click', () => cargar(true));
+
+  await cargar();
+  const enlace = window.location.hash.slice(1).split('/');
+  if (enlace.length === 2 && enlace[1]) {
+    abrir(enlace[0], enlace[1]);
+  }
 }
 
 function iniciarAplicacion() {
@@ -1359,6 +1675,7 @@ function iniciarAplicacion() {
   renderizarVistaTareas();
   renderizarCalendario();
   renderizarRecordatorios();
+  renderizarCorreos();
 }
 
 if (document.readyState === 'loading') {

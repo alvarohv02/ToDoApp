@@ -27,6 +27,19 @@ DESHACER = re.compile(r'^(?:(?:me\s+he\s+equivocado|me\s+equivoque|ups|uy)[\s,.!
                       r'(?:\s+(?:eso|esto|lo\s+ultimo|el\s+ultimo\s+\w+|lo\s+que\s+(?:has\s+hecho|acabas\s+de\s+hacer)))?'
                       r'|vuelve\s+atras|marcha\s+atras|undo|ctrl\s*\+?\s*z|anula\s+(?:eso|lo\s+ultimo)'
                       r'|revierte(?:lo)?(?:\s+(?:eso|lo\s+ultimo))?|me\s+he\s+equivocado|me\s+equivoque)' + _FIN)
+# "correos", "mis correos", "¿tengo correos nuevos?", "¿cuántos correos tengo sin leer?"
+_CORREO = r'(?:correos?|emails?|e-mails?|mails?)'
+LISTAR_CORREOS = [
+    re.compile(r'^(?:(?:mis|ver|ensename|muestrame|dame|leeme)\s+(?:los\s+)?)?' + _CORREO +
+               r'(?:\s+(?:sin\s+leer|no\s+leidos|nuevos|pendientes))?' + _FIN),
+    re.compile(r'^(?:que|cuantos)\s+' + _CORREO + r'\s+(?:tengo|hay)(?:\s+(?:sin\s+leer|nuevos))?' + _FIN),
+    re.compile(r'^(?:tengo|hay)\s+(?:algun\s+)?' + _CORREO + r'(?:\s+(?:nuevos?|sin\s+leer))?' + _FIN),
+]
+# Tras la lista de correos: "lee 2", "archiva el 1", "borra el correo 3", "marca el 2 como leído"
+CORREO_ACCION = re.compile(r'^(?P<verbo>archiva(?:r|lo)?|borra(?:r|lo)?|elimina(?:r|lo)?|leeme|leer|lee|abre(?:me)?|abrir|'
+                           r'ensename|muestrame|marca(?:r)?(?:\s+como\s+leido)?)\s+(?:el\s+)?(?:correo\s+|mail\s+|email\s+)?'
+                           r'(?:numero\s+)?(?P<n>\d{1,2})(?:\s+como\s+leido)?' + _FIN)
+CORREOS_TODOS_LEIDOS = re.compile(r'^marca(?:r|los)?\s+todos(?:\s+los\s+correos)?\s+como\s+leidos' + _FIN)
 NEGACION = re.compile(r'^(?:no|ninguna|nada|cancela|cancelar|dejalo|olvidalo)' + _FIN)
 
 LISTAR = [
@@ -391,6 +404,16 @@ def interpretar(texto, hoy=None, ahora=None):
 
     if LISTAR_RECORDATORIOS.match(normal):
         return {'intencion': 'listar_recordatorios'}
+
+    if any(patron.match(normal) for patron in LISTAR_CORREOS):
+        return {'intencion': 'listar_correos'}
+    if CORREOS_TODOS_LEIDOS.match(normal):
+        return {'intencion': 'correo_accion', 'accion': 'leido', 'todos': True}
+    m = CORREO_ACCION.match(normal)
+    if m:
+        verbo = m.group('verbo')
+        accion = 'archivar' if verbo.startswith('archiva') else 'borrar' if verbo.startswith(('borra', 'elimina'))             else 'leido' if verbo.startswith('marca') else 'abrir'
+        return {'intencion': 'correo_accion', 'accion': accion, 'numero': int(m.group('n'))}
 
     m = CANCELAR_RECORDATORIO.match(normal)
     if m:

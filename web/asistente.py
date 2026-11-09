@@ -7,6 +7,7 @@ import logging
 import re
 import os
 
+import correo
 import db
 import eventos
 import herramientas
@@ -45,7 +46,8 @@ AYUDA = """Puedes escribirme cosas como:
 - *Recuérdame* mañana a las 10 que tengo reunión
 - *Avísame* en 20 minutos de sacar la ropa
 - *Mis recordatorios* / *cancela el recordatorio* de la reunión
-- *Deshaz* (o «me he equivocado»): vuelve atrás lo último que hice"""
+- *Deshaz* (o «me he equivocado»): vuelve atrás lo último que hice
+- *Correos*: los no leídos de todas tus cuentas; luego *lee 2*, *archiva 1*, *borra 3* o *marca todos como leídos*"""
 
 VERBOS = {
     'completar': 'Marcada como hecha ✅',
@@ -172,12 +174,90 @@ def _titulo_periodo(periodo, desde=None, hasta=None):
 
 
 def resumen_del_dia(telefono, hoy):
-    """El mensaje de buenos días: lo de hoy (eventos, tareas, avisos y lo atrasado)."""
+    """El mensaje de buenos días: lo de hoy (eventos, tareas, avisos y lo atrasado) y el correo sin leer."""
     dia = f'{DIAS_SEMANA_BONITOS[hoy.weekday()].capitalize()} {hoy:%d/%m}'
     agenda = _agenda(telefono, dia, hoy, hoy, hoy, con_atrasadas=True)
     if agenda is None:
-        return f'☀️ ¡Buenos días! Hoy, {dia.lower()}, no tienes nada en la agenda 🎉' + _aviso_sin_fecha()
-    return f'☀️ ¡Buenos días! Esto es lo que tienes hoy:\n\n{agenda}' + _aviso_sin_fecha()
+        texto = f'☀️ ¡Buenos días! Hoy, {dia.lower()}, no tienes nada en la agenda 🎉'
+    else:
+        texto = f'☀️ ¡Buenos días! Esto es lo que tienes hoy:\n\n{agenda}'
+    return texto + _linea_correo() + _aviso_sin_fecha()
+
+
+def _linea_correo():
+    cuentas = correo.resumen_cuentas()
+    total = sum(c['no_leidos'] for c in cuentas)
+    if not total:
+        return ''
+    detalle = ''
+    if len(cuentas) > 1:
+        detalle = ' (' + ', '.join(f'{c["nombre"]} {c["no_leidos"]}' for c in cuentas if c['no_leidos']) + ')'
+    return f'\n\n📧 *Correo*: {total} sin leer{detalle}. Escribe *correos* para verlos.'
+
+
+# --- Correo: "correos", y luego "lee 2", "archiva 1", "borra 3" --------------------------
+
+MAX_CORREOS_BOT = 10
+MAX_TEXTO_BOT = 1500
+HECHO_CORREO = {'leido': '✓ Marcado como leído', 'archivar': '🗄️ Archivado', 'borrar': '🗑️ A la papelera'}
+
+
+def _listar_correos(telefono):
+    if not correo.configurado():
+        return 'Aún no hay cuentas de correo conectadas. Se añaden en el .env del servidor (ver deploy/INSTALAR.md).'
+    cuentas = correo.resumen_cuentas()
+    if not any(c['actualizado'] for c in cuentas):
+        correo.actualizar()  # recién arrancado: aún no se habían mirado
+        cuentas = correo.resumen_cuentas()
+    lista = correo.no_leidos()[:MAX_CORREOS_BOT]
+    errores = ''.join(f'\n⚠️ {c["nombre"]}: {c["error"]}' for c in cuentas if c['error'])
+    total = sum(c['no_leidos'] for c in cuentas)
+    if not lista:
+        return 'No tienes correos sin leer 📭' + errores
+
+    hoy = date.today().isoformat()
+    lineas = []
+    for i, c in enumerate(lista, 1):
+        cuando = c['fecha'][11:16] if c['fecha'][:10] == hoy else formatear(c['fecha'][:10], date.today())
+        cuenta = f' · {c["cuenta_nombre"]}' if len(cuentas) > 1 else ''
+        lineas.append(f'{i}. *{c["de"]}* — {c["asunto"]} ({cuando}{cuenta})')
+    db.guardar_pendiente(telefono, {'intencion': 'correo', 'tipo': 'correos',
+                                    'ids': [[c['cuenta'], c['uid'], c['asunto']] for c in lista], 'extra': {}})
+    mas = f' (te enseño los {len(lista)} más recientes)' if total > len(lista) else ''
+    return (f'📧 *Correos sin leer: {total}*{mas}\n\n' + '\n'.join(lineas) + errores +
+            '\n\nResponde *lee 2*, *archiva 1*, *borra 3* o *marca todos como leídos*.')
+
+
+def _accion_correo(telefono, accion, pendiente):
+    if not pendiente or pendiente.get('tipo') != 'correos':
+        return 'Primero escribe *correos* para ver la lista.'
+    db.guardar_pendiente(telefono, pendiente)  # se puede seguir con la misma lista
+    ids = pendiente['ids']
+    try:
+        if accion.get('todos'):
+            # Los de la lista que siguen sin leer (no los ya archivados o borrados)
+            quedan = {(c['cuenta'], c['uid']) for c in correo.no_leidos()}
+            sin_leer = [(cuenta, uid) for cuenta, uid, _ in ids if (cuenta, uid) in quedan]
+            for cuenta, uid in sin_leer:
+                correo.accion(cuenta, uid, 'leido')
+            return f'✓ Marcados como leídos: {len(sin_leer)} correos' if sin_leer else 'Ya estaban todos leídos 👍'
+        if not 1 <= accion['numero'] <= len(ids):
+            return f'Elige un número del 1 al {len(ids)}.'
+        cuenta, uid, asunto = ids[accion['numero'] - 1]
+        if accion['accion'] == 'abrir':
+            leido = correo.leer(cuenta, uid)
+            texto = leido['texto'] or '(sin texto)'
+            if len(texto) > MAX_TEXTO_BOT:
+                texto = texto[:MAX_TEXTO_BOT].rsplit(' ', 1)[0] + '…\n\n(Sigue en la web, en Correos)'
+            adjuntos = f'\n📎 {", ".join(leido["adjuntos"])}' if leido['adjuntos'] else ''
+            return f'*{leido["asunto"]}*\nDe: {leido["de"]} <{leido["direccion"]}>{adjuntos}\n\n{texto}'
+        correo.accion(cuenta, uid, accion['accion'])
+        return f'{HECHO_CORREO[accion["accion"]]}: *{asunto}*'
+    except ValueError as error:
+        return f'No he podido: {error}'
+    except Exception as error:
+        log.warning('Error con el correo: %s', error)
+        return f'No he podido conectar con el correo: {correo._mensaje_error(error)}'
 
 
 def _saludo(telefono, hoy):
@@ -750,6 +830,8 @@ def _resolver_pendiente(telefono, pendiente, numero, hoy):
     ids = pendiente['ids']
     if not 1 <= numero <= len(ids):
         return f'Elige un número del 1 al {len(ids)}.'
+    if pendiente.get('tipo') == 'correos':  # solo el número tras la lista de correos: abrirlo
+        return _accion_correo(telefono, {'accion': 'abrir', 'numero': numero}, pendiente)
     if pendiente.get('tipo') == 'editar':
         tipo, id_ = ids[numero - 1]
         if tipo == 'tarea':
@@ -868,6 +950,10 @@ def _por_reglas(telefono, accion, pendiente, hoy, ahora):
         return _recordatorio(telefono, accion, ahora)
     if intencion == 'recordatorio_sin_hora':
         return _pedir_hora(telefono, accion)
+    if intencion == 'listar_correos':
+        return _listar_correos(telefono)
+    if intencion == 'correo_accion':
+        return _accion_correo(telefono, accion, pendiente)
     if intencion == 'listar_recordatorios':
         return _listar_recordatorios(telefono, hoy)
     if intencion == 'cancelar_recordatorio':

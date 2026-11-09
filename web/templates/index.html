@@ -2,73 +2,66 @@
 {% block titulo %}Inicio{% endblock %}
 
 {% block contenido %}
-<div class="page" id="inicio-app">
+<div class="page panel" id="inicio-app" data-nombre="{{ nombre_usuario }}">
     <header class="page-header">
         <div>
-            <p class="eyebrow" data-inicio-fecha></p>
-            <h1 data-inicio-saludo>Hola 👋</h1>
-            <p class="page-subtitle">Esto es lo que tienes por delante.</p>
+            <h1 class="panel-saludo"><span data-inicio-saludo>Hola</span> <span class="panel-sol" aria-hidden="true">☀️</span></h1>
+            <p class="page-subtitle panel-fecha" data-inicio-fecha></p>
         </div>
         <div class="page-actions">
-            <a class="btn btn-soft" href="/calendar">Abrir calendario</a>
-            <a class="btn btn-primary" href="/tareas">Ver tareas</a>
+            <a class="btn btn-primary" href="#resumen-del-dia" data-ir-resumen>✨ Resumen del día</a>
         </div>
     </header>
 
-    <section class="stats" aria-label="Resumen">
-        <a class="stat" href="/tareas">
-            <span class="stat-label">Tareas pendientes</span>
-            <strong class="stat-value" data-stat-pendientes>–</strong>
-        </a>
-        <a class="stat stat-danger" href="/calendar">
-            <span class="stat-label">Atrasadas</span>
-            <strong class="stat-value" data-stat-atrasadas>–</strong>
-        </a>
-        <a class="stat stat-info" href="/calendar">
-            <span class="stat-label">Eventos esta semana</span>
-            <strong class="stat-value" data-stat-eventos>–</strong>
-        </a>
-        <a class="stat stat-accent" href="/recordatorios">
-            <span class="stat-label">Recordatorios</span>
-            <strong class="stat-value" data-stat-recordatorios>–</strong>
-        </a>
-    </section>
-
-    <div class="home-grid">
-        <section class="card">
+    <div class="panel-grid">
+        <section class="card panel-card">
             <div class="card-header">
-                <h2 class="card-title">Hoy</h2>
-            </div>
-            <ul class="timeline" data-inicio-hoy><li class="empty-state">Cargando…</li></ul>
-        </section>
-
-        <section class="card">
-            <div class="card-header">
-                <h2 class="card-title">Próximos 7 días</h2>
+                <h2 class="card-title"><span class="panel-icono">📅</span> Agenda de hoy</h2>
                 <a class="card-link" href="/calendar">Ver calendario →</a>
             </div>
-            <ul class="timeline" data-inicio-proximos><li class="empty-state">Cargando…</li></ul>
+            <ul class="hoy-lista" data-inicio-hoy><li class="empty-state">Cargando…</li></ul>
         </section>
 
-        <section class="card">
+        <section class="card panel-card">
             <div class="card-header">
-                <h2 class="card-title">Tareas sin fecha</h2>
+                <h2 class="card-title"><span class="panel-icono">⭐</span> Prioridades</h2>
+                <a class="card-link" href="/tareas">Ver tareas →</a>
+            </div>
+            <ul class="checklist" data-inicio-prioridades><li class="empty-state">Cargando…</li></ul>
+        </section>
+
+        <section class="card panel-card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="panel-icono">📧</span> Correos no leídos</h2>
+                <a class="card-link" href="/correos" data-inicio-correos-enlace>Ver todos →</a>
+            </div>
+            <ul class="correo-lista correo-lista-compacta" data-inicio-correos><li class="empty-state">Cargando…</li></ul>
+        </section>
+
+        <section class="card panel-card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="panel-icono">✅</span> Tareas pendientes</h2>
                 <a class="card-link" href="/tareas">Ver todas →</a>
             </div>
-            <ul class="timeline" data-inicio-sinfecha><li class="empty-state">Cargando…</li></ul>
+            <ul class="checklist" data-inicio-pendientes><li class="empty-state">Cargando…</li></ul>
         </section>
 
-        <section class="card card-tips">
+        <section class="card panel-card panel-ancho">
             <div class="card-header">
-                <h2 class="card-title">Pídeselo al bot</h2>
+                <h2 class="card-title"><span class="panel-icono">🔗</span> Herramientas conectadas</h2>
             </div>
-            <p class="card-text">Escribe o manda una nota de voz por Telegram o WhatsApp:</p>
-            <ul class="tips">
-                <li>«Apunta entregar la práctica el viernes a las 14, importancia alta»</li>
-                <li>«Recuérdame mañana a las 10 que tengo dentista»</li>
-                <li>«Resérvame el jueves de 17 a 19 para estudiar»</li>
-                <li>«¿Qué tengo esta semana?»</li>
-            </ul>
+            <ul class="conexiones" data-inicio-conexiones><li class="empty-state">Cargando…</li></ul>
+        </section>
+
+        <section class="card panel-card panel-ancho panel-resumen" id="resumen-del-dia">
+            <div class="panel-resumen-cuerpo">
+                <h2 class="card-title"><span class="panel-icono">✨</span> Resumen del día</h2>
+                <ul class="resumen-puntos" data-inicio-resumen><li>Cargando…</li></ul>
+            </div>
+            <p class="panel-resumen-pista">
+                Pídele más al bot por Telegram o WhatsApp: <em>«¿qué tengo mañana?»</em>, <em>«correos»</em>,
+                <em>«apunta…»</em>
+            </p>
         </section>
     </div>
 </div>

@@ -288,3 +288,48 @@ Detalles:
   cambia en la web; si la borras del calendario en el móvil, la tarea pierde la fecha (no se borra).
 - Si cambias lo mismo en la web y en el móvil antes de que se sincronice, gana lo de la web.
 - Las repeticiones que la app no admite (diarias, varios días por semana en un solo evento...) no se importan.
+
+## Conectar el correo (opcional)
+
+El panel de inicio, la página **Correos** y el bot («correos», «lee 2», «archiva 1»…) leen los no leídos
+de la bandeja de entrada por IMAP. Cada cuenta necesita una **contraseña de aplicación**: una clave aparte
+que solo sirve para esto y se puede revocar sin cambiar tu contraseña normal.
+
+### Gmail
+
+1. Activa la verificación en dos pasos, si no la tienes: https://myaccount.google.com/signinoptions/twosv
+2. Crea una contraseña de aplicación en https://myaccount.google.com/apppasswords (nombre: «Mi Notion»).
+   Google muestra 16 letras en grupos de 4: cópialas tal cual (los espacios dan igual).
+
+### Universidad o trabajo
+
+Necesitas el **servidor IMAP** (pregúntalo o búscalo en la ayuda del correo; suele ser `imap.<dominio>`)
+y una contraseña que permita IMAP:
+- Si el correo es de **Google** (Gmail con el dominio de la universidad): como Gmail, si el centro permite
+  las contraseñas de aplicación. Servidor `imap.gmail.com`.
+- Si es de **Microsoft 365 / Outlook**: Microsoft ya no deja entrar por IMAP con contraseña, así que esa
+  cuenta no se puede conectar de esta forma.
+- Si es un servidor propio: normalmente sirve tu usuario y contraseña de siempre.
+
+### Añadirlas al servidor [admin]
+
+En `/opt/notion/.env` (`sudo nano /opt/notion/.env`), por ejemplo con una cuenta de Gmail y una de la universidad:
+
+```
+NOMBRE_USUARIO=Álvaro
+CORREO_CUENTAS=personal,uni
+CORREO_PERSONAL_NOMBRE=Personal
+CORREO_PERSONAL_USUARIO=tu.correo@gmail.com
+CORREO_PERSONAL_CLAVE=abcd efgh ijkl mnop
+CORREO_UNI_NOMBRE=Universidad
+CORREO_UNI_USUARIO=tu.usuario@universidad.es
+CORREO_UNI_CLAVE=...
+CORREO_UNI_SERVIDOR=imap.universidad.es
+```
+
+Reinicia con `docker compose up -d --force-recreate` [notion_bot]. En el panel, la tarjeta «Herramientas
+conectadas» muestra cada cuenta en verde o, si algo falla, el motivo (por ejemplo, contraseña incorrecta).
+
+Qué hace con tus correos: cada `CORREO_MINUTOS` (5 por defecto) mira los no leídos de la bandeja de
+entrada sin marcarlos como leídos; no guarda los correos en la base de datos ni los envía a ningún sitio.
+Archivar mueve el correo al archivo («Todos» en Gmail) y borrar lo manda a la papelera.

@@ -10,6 +10,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / '.env')
 
 import avisos
 import copias
+import correo
 import db
 import eventos
 import google_cal
@@ -23,7 +24,7 @@ app.register_blueprint(whatsapp_bp)
 
 @app.context_processor
 def datos_comunes():
-    return {'persona_defecto': db.persona_por_defecto()}
+    return {'persona_defecto': db.persona_por_defecto(), 'nombre_usuario': os.getenv('NOMBRE_USUARIO', '').strip()}
 
 
 @app.route('/')
@@ -60,6 +61,56 @@ def legal_privacidad():
 @app.route('/recordatorios')
 def recordatorios():
     return render_template('./recordatorios.html')
+
+
+@app.route('/correos')
+def correos():
+    return render_template('./correos.html')
+
+
+# --- Correo --------------------------------------------------------------------------
+
+@app.route('/api/correos')
+def correos_api():
+    return jsonify({'cuentas': correo.resumen_cuentas(), 'correos': correo.no_leidos()})
+
+
+@app.route('/api/correos/actualizar', methods=['POST'])
+def correos_actualizar():
+    correo.actualizar()
+    return correos_api()
+
+
+@app.route('/api/correos/<cuenta>/<int:uid>')
+def correo_api(cuenta, uid):
+    try:
+        return jsonify(correo.leer(cuenta, uid))
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 404
+    except Exception as error:
+        return jsonify({'error': f'No se pudo abrir el correo: {correo._mensaje_error(error)}'}), 502
+
+
+@app.route('/api/correos/<cuenta>/<int:uid>/<que>', methods=['POST'])
+def correo_accion_api(cuenta, uid, que):
+    try:
+        correo.accion(cuenta, uid, que)
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+    except Exception as error:
+        return jsonify({'error': f'No se pudo hacer: {correo._mensaje_error(error)}'}), 502
+    return jsonify({'ok': True})
+
+
+@app.route('/api/conexiones')
+def conexiones_api():
+    """Qué está conectado, para el panel de inicio (sin datos sensibles)."""
+    return jsonify({
+        'google': {**google_cal.estado, 'configurado': google_cal.configurado()},
+        'telegram': bool(os.getenv('TELEGRAM_TOKEN')),
+        'whatsapp': bool(os.getenv('TOKEN') and os.getenv('WHATSAPP_PHONE_NUMBER_ID')),
+        'correos': correo.resumen_cuentas(),
+    })
 
 
 def recordatorio_a_json(recordatorio):
@@ -149,10 +200,6 @@ def recordatorio_api(recordatorio_id):
         db.actualizar_recordatorio(recordatorio_id, 'cancelado')
         return '', 204
 
-    payload = request.get_json(silent=True) or {}
-    texto = (payload.get('texto') or '').strip()
-    if not texto:
-        return jsonify({'error': 'El recordatorio necesita un texto'}), 400
     try:
         cuando = datetime.strptime((payload.get('cuando') or '')[:16], '%Y-%m-%dT%H:%M')
     except ValueError:
@@ -160,7 +207,7 @@ def recordatorio_api(recordatorio_id):
     if cuando <= datetime.now():
         return jsonify({'error': 'La fecha y hora deben ser futuras'}), 400
 
-    db.editar_recordatorio(recordatorio_id, texto, cuando)
+    db.editar_recordatorio(recordatorio_id, texto, cuando, destino)
     return jsonify(recordatorio_a_json(db.obtener_recordatorio(recordatorio_id)))
 
 
@@ -209,6 +256,7 @@ if os.getenv('FLASK_DEBUG') != '1' or os.getenv('WERKZEUG_RUN_MAIN') == 'true':
     google_cal.arrancar_en_segundo_plano()
     copias.arrancar_en_segundo_plano()
     resumen.arrancar_en_segundo_plano()
+    correo.arrancar_en_segundo_plano()
 
 if __name__ == '__main__':
     # Desarrollo en local. En el servidor se ejecuta con Docker (ver docker-compose.yml)
