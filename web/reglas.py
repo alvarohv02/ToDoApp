@@ -53,8 +53,17 @@ EMPEZAR = [
     re.compile(rf'^(?:marca|pon)\s+{_OBJETO}(?P<objeto>.+?)\s+(?:como\s+)?en\s+curso' + _FIN),
 ]
 BORRAR = re.compile(rf'^(?:borra|borrar|elimina|eliminar|quita|quitar|cancela|cancelar)\s+{_OBJETO}(?P<objeto>.+)$')
-MOVER = re.compile(rf'^(?:mueve|mover|cambia|cambiar|pasa|pasar|aplaza|aplazar|retrasa|retrasar|adelanta|adelantar)\s+'
-                   rf'{_OBJETO}(?P<objeto>.+?)\s+(?:a|al|para|para\s+el|hasta)\s+(?P<cuando>.+)$')
+# "mueve X al lunes", "cambia la cena a las 22", "pasa la clase de mates del lunes al martes de 9 a 11"
+_VERBO_MOVER = re.compile(r'^(?:mueve|mover|cambia|cambiar|pasa|pasar|aplaza|aplazar|retrasa|retrasar|adelanta|'
+                          r'adelantar|pon|poner)\s+')
+_CORTE_MOVER = re.compile(r'\s(?=(?:a|al|para|hasta|de)\s)')
+_CONECTORES_MOVER = {'a', 'al', 'para', 'el', 'la', 'las', 'hasta', 'de', 'y'}
+_QUE_CAMBIAR = re.compile(r'(?:la\s+)?(?:hora|fecha|dia)\s+(?:de\s+(?:la\s+|el\s+|lo\s+de\s+)?|del\s+)')
+RENOMBRAR = [
+    re.compile(rf'^(?:cambia|cambiar|pon|poner)\s+(?:el\s+)?(?:nombre|titulo)\s+(?:de|del|a|al)\s+{_OBJETO}'
+               rf'(?P<objeto>.+?)\s+(?:a|por|como|en)\s+(?P<nuevo>.+?)' + _FIN),
+    re.compile(rf'^(?:renombra|renombrar)\s+{_OBJETO}(?P<objeto>.+?)\s+(?:a|como|por)\s+(?P<nuevo>.+?)' + _FIN),
+]
 # Debe ir antes que BORRAR: "quita la fecha del informe" no es borrar la tarea
 QUITAR_FECHA = re.compile(rf'^(?:quita|quitar|elimina|eliminar|borra|borrar)\s+(?:la\s+)?fecha(?:\s+limite)?\s+'
                           rf'(?:de|del|a|al)\s+{_OBJETO}(?P<objeto>.+)$')
@@ -167,6 +176,53 @@ def _es_solo_fecha(texto, hoy):
 
 def _quitar(original, m):
     return (original[:m.start()] + ' ' + original[m.end():]).strip()
+
+
+def _interpretar_edicion(original, normal, hoy, ahora):
+    """'mueve X al lunes a las 10' -> qué (X) y a cuándo; vale para tareas y para eventos.
+
+    Se prueba a cortar por cada "a / al / para / hasta / de" y se queda el primer corte cuya parte
+    derecha es solo una fecha y/o una hora: así "la clase de mates de 10 a 12" no corta en "de mates".
+    """
+    m = _VERBO_MOVER.match(normal)
+    if not m:
+        return None
+    for corte in _CORTE_MOVER.finditer(normal, m.end()):
+        derecha = original[corte.end():]
+        separador = normal[corte.end():].split()[0]
+        # "a los martes": toda la serie pasa a ese día de la semana
+        semanal = re.match(r'(?:a\s+)?los\s+(?=(?:lunes|martes|miercoles|jueves|viernes|sabados?|domingos?)\b)',
+                           normalizar(derecha))
+        if semanal:
+            derecha = 'el ' + re.sub(r'(?i)^(s[aá]bado|domingo)s\b', r'\1', derecha[semanal.end():])
+        hora_inicio, hora_fin, resto = extraer_horario(derecha)
+        fecha, resto = extraer_fecha(resto, hoy)
+        if not (fecha or hora_inicio) or set(re.findall(r'\w+', normalizar(resto))) - _CONECTORES_MOVER:
+            continue
+        if separador == 'de' and not hora_fin:
+            continue  # "de" solo vale para un horario: "de 10 a 12"
+
+        inicio = m.end()
+        que = _QUE_CAMBIAR.match(normal, inicio, corte.start())  # "cambia la hora de la cena..."
+        if que:
+            inicio = que.end()
+        inicio = re.compile(_OBJETO).match(normal, inicio, corte.start()).end()
+        objeto = _recortar(original, inicio, corte.start())
+        if not objeto:
+            return None
+
+        accion = {'intencion': 'mover', 'objeto': objeto, 'fecha': fecha.isoformat() if fecha else '',
+                  'hora_inicio': hora_inicio, 'hora_fin': hora_fin, 'todas': bool(semanal)}
+        if fecha:
+            accion['fecha_limite'] = fecha.isoformat()
+        else:
+            # Solo la hora: una tarea sin fecha se pone para la próxima vez que llegue esa hora
+            momento, _ = extraer_momento(derecha, ahora)
+            accion['fecha_si_no_hay'] = (momento.date() if momento else hoy).isoformat()
+        if hora_inicio:
+            accion['hora_limite'] = hora_inicio
+        return accion
+    return None
 
 
 def _interpretar_creacion(original, hoy, ahora):
@@ -432,17 +488,16 @@ def interpretar(texto, hoy=None, ahora=None):
             nivel = {'alta': 'Alta', 'media': 'Media', 'baja': 'Baja'}.get(m.group('imp'), 'Alta')
             return {'intencion': 'importancia', 'objeto': _recortar(original, *m.span('objeto')), 'importancia': nivel}
 
-    m = MOVER.match(normal)
-    if m:
-        cuando = original[m.start('cuando'):]
-        momento, sobrante = extraer_momento(cuando, ahora)
-        if momento and not sobrante.strip(' .!?'):
-            return {'intencion': 'mover', 'objeto': _recortar(original, *m.span('objeto')),
-                    'fecha_limite': momento.date().isoformat(), 'hora_limite': f'{momento:%H:%M}'}
-        if _es_solo_fecha(cuando, hoy):
-            fecha, _ = extraer_fecha(cuando, hoy)
-            return {'intencion': 'mover', 'objeto': _recortar(original, *m.span('objeto')),
-                    'fecha_limite': fecha.isoformat()}
+    for patron in RENOMBRAR:
+        m = patron.match(normal)
+        if m:
+            nuevo = _recortar(original, *m.span('nuevo')).strip('«»"\'')
+            return {'intencion': 'renombrar', 'objeto': _recortar(original, *m.span('objeto')),
+                    'nombre': nuevo[:1].upper() + nuevo[1:]}
+
+    accion = _interpretar_edicion(original, normal, hoy, ahora)
+    if accion:
+        return accion
 
     m = QUITAR_FECHA.match(normal)
     if m:

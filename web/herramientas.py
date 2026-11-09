@@ -86,7 +86,10 @@ def parecido(consulta, nombre):
     cobertura = 0
     if palabras_c and palabras_n:
         cobertura = sum(max(_palabra_parecida(pc, pn) for pn in palabras_n) for pc in palabras_c) / len(palabras_c)
-    return max(cobertura * 0.85, SequenceMatcher(None, c, n).ratio())
+    # El parecido letra a letra de la frase entera solo cuenta si es alto (faltas de ortografía):
+    # si no, "clase de mates" se parecería a "cumpleaños de mi abuela" solo por las letras sueltas
+    ratio = SequenceMatcher(None, c, n).ratio()
+    return max(cobertura * 0.85, ratio if ratio >= 0.75 else 0)
 
 
 def elegir(puntuados, umbral=0.5, margen=0.15, maximo=5):
@@ -94,7 +97,8 @@ def elegir(puntuados, umbral=0.5, margen=0.15, maximo=5):
     puntuados = [p for p in puntuados if p[0] >= umbral]
     if puntuados and (len(puntuados) == 1 or puntuados[0][0] - puntuados[1][0] >= margen):
         return puntuados[:1]
-    return puntuados[:maximo]
+    # Las que se quedan muy por detrás de la mejor no merecen salir en la lista
+    return [p for p in puntuados if p[0] >= puntuados[0][0] - 2 * margen][:maximo]
 
 
 def buscar_por_nombre(consulta, incluir_terminadas=False):

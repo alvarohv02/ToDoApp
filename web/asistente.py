@@ -30,6 +30,7 @@ AYUDA = """Puedes escribirme cosas como:
 - *Añade al calendario* el gimnasio todos los días a las 7 / pagar el alquiler el día 1 de cada mes
 - *El cumple de* Marta es el 23 de octubre
 - *Borra el evento* de la cena
+- *Cambia* la cena al sábado a las 22 / la clase de mates *de 10 a 12* / *el nombre* de la cena a cena familiar
 
 🎙️ También puedes mandarme *notas de voz*, incluso con varias cosas a la vez:
 «apunta comprar pan y recuérdame a las cinco llamar a Marta»
@@ -53,6 +54,7 @@ VERBOS = {
     'mover': 'Movida 📅',
     'importancia': 'Importancia cambiada',
     'asignar': 'Asignada 👤',
+    'renombrar': 'Renombrada ✏️',
 }
 
 
@@ -291,10 +293,16 @@ def _aplicar(intencion, tarea, extra, hoy):
     elif intencion == 'mover':
         # Si solo se da el día ("mueve X al lunes"), se conserva la hora que tuviera
         cambios = {k: extra[k] for k in ('fecha_limite', 'hora_limite') if k in extra}
+        if 'fecha_limite' not in cambios:
+            # Solo la hora ("pasa el informe a las 18"): se queda el día que tuviera
+            cambios['fecha_limite'] = tarea['fecha_limite'] or extra.get('fecha_si_no_hay', '')
         movida = herramientas.actualizar_tarea(tarea['id'], **cambios)
-        if not extra['fecha_limite']:
+        if not cambios['fecha_limite']:
             return f'Quitada la fecha límite de *{tarea["nombre"]}*'
         return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {_fecha_tarea(movida, hoy)}'
+    elif intencion == 'renombrar':
+        herramientas.actualizar_tarea(tarea['id'], nombre=extra['nombre'])
+        return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → *{extra["nombre"]}*'
     elif intencion == 'importancia':
         herramientas.actualizar_tarea(tarea['id'], importancia=extra['importancia'])
         return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {EMOJI_IMPORTANCIA[extra["importancia"]]} {extra["importancia"]}'
@@ -309,6 +317,9 @@ def _sobre_tarea(telefono, accion, hoy):
     extra = {k: v for k, v in accion.items() if k not in ('intencion', 'objeto')}
     if intencion == 'borrar':
         return _borrar(telefono, accion['objeto'], hoy)
+    # Cambiar fecha, hora o nombre vale también para eventos ("quita la fecha" solo para tareas)
+    if intencion == 'renombrar' or (intencion == 'mover' and ('fecha' in accion or 'hora_inicio' in accion)):
+        return _editar(telefono, accion, hoy)
     candidatas = herramientas.buscar_por_nombre(accion['objeto'])
 
     if not candidatas:
@@ -517,13 +528,12 @@ def _de_dia(fecha_iso, hoy):
     return f'de {texto}' if texto in ('hoy', 'mañana') else f'del {texto}'
 
 
-def _borrar(telefono, objeto, hoy, con_tareas=True):
-    """«borra X»: busca X entre las tareas y los eventos, aunque no se escriba el nombre exacto.
+def _buscar_cosas(objeto, hoy, con_tareas=True, incluir_terminadas=True):
+    """Tareas y eventos que se parecen a «objeto», aunque no se escriba el nombre exacto.
 
-    Nunca borra a la primera: si hay una que encaja claramente pregunta «¿Borro…?», y si hay
-    varias parecidas las enumera para elegir.
+    Devuelve (día, lo_buscado, [(tipo, cosa)...]). En "la clase de Cálculo del lunes" el día indica
+    qué repetición se quiere tocar y no forma parte del nombre.
     """
-    # "la clase de Cálculo del lunes": el día indica qué repetición borrar (y no forma parte del nombre)
     dia, resto = extraer_fecha(objeto, hoy)
     sin_dia = re.sub(r'(?i)\s+(?:del|de|el|la)$', '', resto.strip(' ,.')) if dia else ''
 
@@ -532,16 +542,55 @@ def _borrar(telefono, objeto, hoy, con_tareas=True):
 
     puntuados = [(nota(e['titulo']), 'evento', e) for e in db.listar_eventos()]
     if con_tareas:
-        puntuados += [(nota(t['nombre']), 'tarea', t) for t in herramientas.listar_tareas(incluir_terminadas=True)]
+        puntuados += [(nota(t['nombre']), 'tarea', t)
+                      for t in herramientas.listar_tareas(incluir_terminadas=incluir_terminadas)]
     puntuados.sort(key=lambda p: p[0], reverse=True)
     elegidos = [(tipo, cosa) for _, tipo, cosa in herramientas.elegir(puntuados)]
 
-    buscado = sin_dia or objeto
+    # Un día cambiado "solo ese día" es un evento suelto con el mismo título que su serie, y un cambio
+    # "de aquí en adelante" cierra la serie y abre otra igual: entre los que se llaman igual, con día
+    # se elige el que cae ese día, y sin día la serie que sigue en marcha
+    grupos = {}
+    for tipo, cosa in elegidos:
+        if tipo == 'evento':
+            grupos.setdefault(normalizar(cosa['titulo']), []).append(cosa)
+    sobran = set()
+    for grupo in (g for g in grupos.values() if len(g) > 1):
+        if dia:
+            buenos = [e for e in grupo if _cae_el(e, dia)]
+        else:
+            buenos = [e for e in grupo if e['repeticion'] and eventos.proxima_ocurrencia(e, hoy)]
+        if buenos:
+            sobran |= {e['id'] for e in grupo if e not in buenos}
+    return dia, sin_dia or objeto, [(t, c) for t, c in elegidos if not (t == 'evento' and c['id'] in sobran)]
+
+
+def _cae_el(evento, dia):
+    return eventos.ocurre_el(evento, dia) and dia.isoformat() not in db.excepciones_de(evento['id'])
+
+
+def _no_encuentro(buscado, con_tareas=True):
+    if not con_tareas:
+        return f'No encuentro ningún evento parecido a «{buscado}».'
+    return (f'No encuentro ninguna tarea ni evento parecido a «{buscado}». '
+            'Escribe *tareas* o *qué tengo esta semana* para ver lo que hay.')
+
+
+def _opciones(elegidos):
+    return '\n'.join(f'{i}. 📝 {c["nombre"]} (tarea)' if t == 'tarea' else
+                     f'{i}. {eventos.EMOJI_CATEGORIA.get(c["categoria"], "📅")} {c["titulo"]} ({_cuando_evento(c)})'
+                     for i, (t, c) in enumerate(elegidos, 1))
+
+
+def _borrar(telefono, objeto, hoy, con_tareas=True):
+    """«borra X»: busca X entre las tareas y los eventos.
+
+    Nunca borra a la primera: si hay una que encaja claramente pregunta «¿Borro…?», y si hay
+    varias parecidas las enumera para elegir.
+    """
+    dia, buscado, elegidos = _buscar_cosas(objeto, hoy, con_tareas)
     if not elegidos:
-        if not con_tareas:
-            return f'No encuentro ningún evento parecido a «{buscado}».'
-        return (f'No encuentro ninguna tarea ni evento parecido a «{buscado}». '
-                'Escribe *tareas* o *qué tengo esta semana* para ver lo que hay.')
+        return _no_encuentro(buscado, con_tareas)
     if len(elegidos) == 1:
         tipo, cosa = elegidos[0]
         if tipo == 'evento':
@@ -551,10 +600,89 @@ def _borrar(telefono, objeto, hoy, con_tareas=True):
 
     db.guardar_pendiente(telefono, {'intencion': 'borrar', 'tipo': 'mixto', 'ids': [[t, c['id']] for t, c in elegidos],
                                     'extra': {'fecha': dia.isoformat() if dia else ''}})
-    opciones = '\n'.join(f'{i}. 📝 {c["nombre"]} (tarea)' if t == 'tarea' else
-                         f'{i}. {eventos.EMOJI_CATEGORIA.get(c["categoria"], "📅")} {c["titulo"]} ({_cuando_evento(c)})'
-                         for i, (t, c) in enumerate(elegidos, 1))
-    return f'Hay varias cosas que encajan, ¿cuál borro?\n{opciones}\n\nResponde con el número, *todos* o *no*.'
+    return f'Hay varias cosas que encajan, ¿cuál borro?\n{_opciones(elegidos)}\n\nResponde con el número, *todos* o *no*.'
+
+
+# --- Editar: "mueve la cena al sábado", "cambia la clase de mates de 10 a 12" ----------------
+
+def _cambios_evento(extra):
+    """Lo que cambia de un evento según la petición (solo lo que se ha dicho)."""
+    cambios = {k: extra[k] for k in ('fecha', 'hora_inicio', 'hora_fin') if extra.get(k)}
+    if extra.get('nombre'):
+        cambios['titulo'] = extra['nombre']
+    return cambios
+
+
+def _editar(telefono, accion, hoy):
+    """Cambia una tarea o un evento; si hay varios parecidos, pregunta cuál."""
+    intencion = accion['intencion']
+    extra = {k: v for k, v in accion.items() if k not in ('intencion', 'objeto')}
+    dia, buscado, elegidos = _buscar_cosas(accion['objeto'], hoy, incluir_terminadas=False)
+    if not elegidos:
+        return _no_encuentro(buscado)
+    if len(elegidos) == 1:
+        tipo, cosa = elegidos[0]
+        if tipo == 'tarea':
+            return _aplicar(intencion, cosa, extra, hoy)
+        return _preguntar_editar_evento(telefono, cosa, _cambios_evento(extra), dia, hoy, extra.get('todas'))
+
+    db.guardar_pendiente(telefono, {'intencion': intencion, 'tipo': 'editar', 'ids': [[t, c['id']] for t, c in elegidos],
+                                    'extra': extra, 'dia': dia.isoformat() if dia else ''})
+    return f'Hay varias cosas que encajan, ¿cuál cambio?\n{_opciones(elegidos)}\n\nResponde con el número (o *no*).'
+
+
+def _preguntar_editar_evento(telefono, evento, cambios, dia, hoy, todas=False):
+    """Si el evento se repite y no se ha dicho qué día, pregunta si solo el próximo o todos."""
+    if evento['repeticion'] and dia:
+        return _editar_evento(evento, cambios, 'uno', dia, hoy)
+    proxima = eventos.proxima_ocurrencia(evento, hoy) if evento['repeticion'] else None
+    if todas and proxima:  # "pasa la clase a los martes": todas, sin preguntar
+        return _editar_evento(evento, cambios, 'siguientes' if evento['repeticion'] in eventos.CON_FIN else 'serie',
+                              proxima, hoy)
+    if evento['repeticion'] and set(cambios) != {'titulo'}:
+        if proxima:
+            db.guardar_pendiente(telefono, {'intencion': 'editar_evento', 'tipo': 'evento_editar',
+                                            'ids': [evento['id'], evento['id']],
+                                            'extra': {'cambios': cambios, 'fecha': proxima.isoformat()}})
+            return (f'*{evento["titulo"]}* se repite {REPETICION_BONITA[evento["repeticion"]]}. ¿Qué cambio?\n'
+                    f'1. Solo el próximo ({formatear(proxima.isoformat(), hoy)})\n2. Todos, a partir del próximo\n\n'
+                    'Responde con el número (o *no*).')
+    return _editar_evento(evento, cambios, 'serie', None, hoy)
+
+
+def _minutos(hora):
+    return int(hora[:2]) * 60 + int(hora[3:5])
+
+
+def _editar_evento(evento, cambios, alcance, dia, hoy):
+    """Aplica los cambios a todo el evento ('serie'), a un solo día ('uno') o desde un día ('siguientes')."""
+    if alcance != 'serie' and not eventos.ocurre_el(evento, dia):
+        return f'*{evento["titulo"]}* no tiene repetición el {formatear(dia.isoformat(), hoy)} 🤔'
+    datos = dict(evento)
+    if alcance != 'serie':
+        datos['fecha'] = dia.isoformat()
+    datos.update({k: v for k, v in cambios.items() if k in ('titulo', 'fecha')})
+    if alcance == 'serie' and evento['repeticion'] == 'anual' and cambios.get('fecha'):
+        datos['fecha'] = evento['fecha'][:4] + cambios['fecha'][4:]  # el cumple cambia de día, no de año de inicio
+    if cambios.get('hora_inicio'):
+        fin = cambios.get('hora_fin', '')
+        if not fin and evento['hora_inicio'] and evento['hora_fin']:
+            # Solo la hora de empiezo: se mantiene lo que duraba
+            final = _minutos(cambios['hora_inicio']) + _minutos(evento['hora_fin']) - _minutos(evento['hora_inicio'])
+            fin = f'{final // 60:02d}:{final % 60:02d}' if final < 24 * 60 else ''
+        datos.update(hora_inicio=cambios['hora_inicio'], hora_fin=fin)
+    try:
+        nuevo_id = eventos.modificar(evento, datos, alcance, dia)
+    except ValueError as error:
+        return f'No he podido cambiarlo: {error}'
+
+    nuevo = db.obtener_evento(nuevo_id)
+    partes = [formatear(nuevo['fecha'], hoy)] if not nuevo['repeticion'] else [_cuando_evento(nuevo)]
+    if eventos.horario(nuevo):
+        partes.append(eventos.horario(nuevo))
+    nota = {'uno': ' (solo ese día)', 'siguientes': ' (de aquí en adelante)'}.get(alcance, '')
+    return (f'✏️ Cambiado{nota}: *{nuevo["titulo"]}* → {" · ".join(partes)}'
+            + _aviso_solapes(_solapes_eventos([nuevo], hoy), hoy))
 
 
 def _borrar_evento(telefono, objeto, hoy):
@@ -591,7 +719,8 @@ def _cuando_evento(evento):
     if evento['repeticion'] == 'mensual':
         return f'el día {fecha.day} de cada mes'
     if evento['repeticion'] == 'semanal':
-        return f'los {DIAS_SEMANA_BONITOS[fecha.weekday()]}'
+        dia = DIAS_SEMANA_BONITOS[fecha.weekday()]
+        return f'los {dia if dia.endswith("s") else dia + "s"}'  # "los lunes", "los sábados"
     if evento['repeticion'] == 'anual':
         return f'cada año, el {fecha:%d/%m}'
     return f'el {fecha:%d/%m}'
@@ -612,6 +741,28 @@ def _resolver_pendiente(telefono, pendiente, numero, hoy):
     ids = pendiente['ids']
     if not 1 <= numero <= len(ids):
         return f'Elige un número del 1 al {len(ids)}.'
+    if pendiente.get('tipo') == 'editar':
+        tipo, id_ = ids[numero - 1]
+        if tipo == 'tarea':
+            tarea = db.fetch_task(id_)
+            return _aplicar(pendiente['intencion'], tarea, pendiente['extra'], hoy) if tarea else 'Esa tarea ya no existe.'
+        evento = db.obtener_evento(id_)
+        if evento is None:
+            return 'Ese evento ya no existe.'
+        dia = date.fromisoformat(pendiente['dia']) if pendiente.get('dia') else None
+        return _preguntar_editar_evento(telefono, evento, _cambios_evento(pendiente['extra']), dia, hoy,
+                                        pendiente['extra'].get('todas'))
+    if pendiente.get('tipo') == 'evento_editar':
+        evento = db.obtener_evento(ids[0])
+        if evento is None:
+            return 'Ese evento ya no existe.'
+        proxima = date.fromisoformat(pendiente['extra']['fecha'])
+        if numero == 1:
+            return _editar_evento(evento, pendiente['extra']['cambios'], 'uno', proxima, hoy)
+        # Todos: cambian desde el próximo (los anteriores se quedan como estaban); los cumpleaños, enteros
+        if evento['repeticion'] in eventos.CON_FIN:
+            return _editar_evento(evento, pendiente['extra']['cambios'], 'siguientes', proxima, hoy)
+        return _editar_evento(evento, pendiente['extra']['cambios'], 'serie', None, hoy)
     if pendiente.get('tipo') == 'mixto':
         tipo, id_ = ids[numero - 1]
         if tipo == 'evento':
@@ -683,7 +834,7 @@ def _por_reglas(telefono, accion, pendiente, hoy, ahora):
         return (f'¿Para cuándo pongo «{titulo}» en el calendario? Dime el día (y la hora si quieres), por ejemplo:\n'
                 f'"resérvame el jueves de 17 a 19 para {titulo}" o "resérvame los martes de 18 a 19 para {titulo}"')
     if intencion == 'seleccion_todos':
-        if pendiente and pendiente.get('tipo') == 'evento_serie':
+        if pendiente and pendiente.get('tipo') in ('evento_serie', 'evento_editar'):
             return _resolver_pendiente(telefono, pendiente, 2, hoy)  # "todos" = toda la serie
         if pendiente and pendiente.get('tipo') == 'mixto':
             return _borrar_varios(pendiente)
