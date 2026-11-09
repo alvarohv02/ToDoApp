@@ -7,7 +7,7 @@ from datetime import datetime
 import re
 
 from fechas import (extraer_fecha, extraer_horario, extraer_momento, extraer_repeticion, normalizar, proximo_dia,
-                    rango_periodo)
+                    proximo_dia_del_mes, rango_periodo)
 
 # Artículos y muletillas que pueden ir delante del nombre de una tarea
 _OBJETO = r'(?:(?:la|el|lo|las)\s+)?(?:tarea\s+)?(?:(?:de|del|que)\s+)?'
@@ -235,7 +235,7 @@ def _interpretar_evento(original, hoy, explicito=True):
     categoria = next((c for patron, c in CATEGORIA_EVENTO if patron.search(normal)), 'Otro')
 
     _, texto = _quitar_patron(original, _RELLENO_RESERVA)
-    dias, repeticion, hasta, texto = extraer_repeticion(texto, hoy)
+    dias, repeticion, hasta, texto, dia_mes = extraer_repeticion(texto, hoy)
     duracion, texto = _quitar_patron(texto, _DURACION)
     inicio, fin, texto = extraer_horario(texto)
     if not inicio:
@@ -254,6 +254,10 @@ def _interpretar_evento(original, hoy, explicito=True):
                 minutos += 30
         fin = _sumar_minutos(inicio, minutos)
     fecha, texto = extraer_fecha(texto, hoy)
+    if fecha is None and dia_mes:
+        fecha = proximo_dia_del_mes(hoy, dia_mes)
+    elif fecha is None and repeticion == 'diaria':
+        fecha = hoy  # "el gimnasio todos los días a las 7": desde hoy
     if fecha is None and not dias:
         if explicito or categoria != 'Otro':
             return {'intencion': 'evento_sin_fecha', 'titulo': _limpiar_titulo(texto)}
@@ -279,7 +283,7 @@ def _interpretar_evento(original, hoy, explicito=True):
             'hora_inicio': inicio,
             'hora_fin': fin,
             'repeticion': repeticion,
-            'hasta': hasta.isoformat() if hasta and repeticion == 'semanal' else '',
+            'hasta': hasta.isoformat() if hasta and repeticion in ('diaria', 'semanal', 'mensual') else '',
         } for f in fechas],
     }
 

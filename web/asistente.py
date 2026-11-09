@@ -27,6 +27,7 @@ AYUDA = """Puedes escribirme cosas como:
 - *Añade al calendario* la cena el sábado a las 21
 - *Resérvame* el viernes de 9 a 11 para la reunión con Juan
 - *Tengo clase* de Cálculo los lunes y miércoles de 9 a 11 hasta el 18/12
+- *Añade al calendario* el gimnasio todos los días a las 7 / pagar el alquiler el día 1 de cada mes
 - *El cumple de* Marta es el 23 de octubre
 - *Borra el evento* de la cena
 
@@ -96,6 +97,29 @@ def _linea_evento(evento, hoy, con_fecha=True):
     return f'- {emoji} *{evento["titulo"]}*' + (f' · {" · ".join(partes)}' if partes else '')
 
 
+def _lineas_eventos(lista, hoy, con_fecha=True):
+    """Líneas de una lista de ocurrencias; con varios días, lo diario sale una sola vez ("cada día")."""
+    if not con_fecha:
+        return [_linea_evento(e, hoy, False) for e in lista]
+    dias = {}
+    for e in lista:
+        if e['repeticion'] == 'diaria':
+            dias.setdefault(e['id'], []).append(e['fecha'])
+    lineas, puestos = [], set()
+    for e in lista:
+        if len(dias.get(e['id'], [])) < 2:
+            lineas.append(_linea_evento(e, hoy))
+        elif e['id'] not in puestos:
+            puestos.add(e['id'])
+            fechas = dias[e['id']]
+            partes = [f'cada día ({formatear(fechas[0], hoy)} – {formatear(fechas[-1], hoy)})']
+            if eventos.horario(e):
+                partes.append(eventos.horario(e))
+            emoji = eventos.EMOJI_CATEGORIA.get(e['categoria'], '📌')
+            lineas.append(f'- {emoji} *{e["titulo"]}* · {" · ".join(partes)}')
+    return lineas
+
+
 def _destinos(telefono):
     """Todos los chats de la misma persona, según CUENTAS_VINCULADAS en el .env.
 
@@ -122,7 +146,7 @@ def _agenda(telefono, titulo, desde, hasta, hoy, con_atrasadas=False):
     """Eventos, tareas que vencen y recordatorios entre dos fechas, por categorías. None si no hay nada."""
     un_dia = desde == hasta
     secciones = [
-        ('📅 Eventos', [_linea_evento(e, hoy, not un_dia) for e in eventos.en_rango(desde, hasta)]),
+        ('📅 Eventos', _lineas_eventos(eventos.en_rango(desde, hasta), hoy, not un_dia)),
         ('✅ Tareas que vencen', [_linea(t, hoy) for t in herramientas.listar_tareas(
             fecha_limite_desde=desde.isoformat(), fecha_limite_hasta=hasta.isoformat())]),
         ('⏰ Recordatorios', [_linea_recordatorio(r, hoy, not un_dia, len(_destinos(telefono)) > 1)
@@ -163,8 +187,8 @@ def _listar_eventos(periodo, categoria, hoy):
     nombre = {'Clase': 'clases', 'Cumpleaños': 'cumpleaños', 'Examen': 'exámenes'}.get(categoria, 'eventos')
     if not lista:
         return f'No hay {nombre} en ese periodo.'
-    return f'*{nombre.capitalize()} · {titulo.lower()}* ({len(lista)})\n' + \
-        '\n'.join(_linea_evento(e, hoy, desde != hasta) for e in lista)
+    lineas = _lineas_eventos(lista, hoy, desde != hasta)
+    return f'*{nombre.capitalize()} · {titulo.lower()}* ({len(lineas)})\n' + '\n'.join(lineas)
 
 
 def _listar_tareas_filtradas(filtros, hoy):
@@ -369,7 +393,7 @@ def _cancelar_recordatorio(telefono, objeto):
 
 # --- Eventos del calendario ---------------------------------------------------------
 
-REPETICION_BONITA = {'semanal': 'cada semana', 'anual': 'cada año'}
+REPETICION_BONITA = {'diaria': 'cada día', 'semanal': 'cada semana', 'mensual': 'cada mes', 'anual': 'cada año'}
 
 
 # --- Solapes: avisar si lo nuevo choca con algo que ya había --------------------------------
@@ -471,6 +495,12 @@ def _crear_evento(accion, hoy):
         cuando = [f'los {dias}', 'cada semana']
         if primero['hasta']:
             cuando[-1] += f' hasta el {date.fromisoformat(primero["hasta"]):%d/%m}'
+    elif primero['repeticion'] in ('diaria', 'mensual'):
+        cuando = [_cuando_evento(primero)]
+        if date.fromisoformat(primero['fecha']) > hoy:
+            cuando[0] += f', desde el {formatear(primero["fecha"], hoy)}'
+        if primero['hasta']:
+            cuando[0] += f' hasta el {date.fromisoformat(primero["hasta"]):%d/%m}'
     else:
         cuando = [formatear(primero['fecha'], hoy)]
         if primero['repeticion']:
@@ -554,8 +584,12 @@ def _preguntar_borrar_evento(telefono, evento, dia, hoy):
 
 
 def _cuando_evento(evento):
-    """'los lunes', 'cada año, el 23/10' o 'el 24/10' para distinguir eventos parecidos."""
+    """'los lunes', 'todos los días', 'el día 5 de cada mes', 'cada año, el 23/10' o 'el 24/10'."""
     fecha = date.fromisoformat(evento['fecha'])
+    if evento['repeticion'] == 'diaria':
+        return 'todos los días'
+    if evento['repeticion'] == 'mensual':
+        return f'el día {fecha.day} de cada mes'
     if evento['repeticion'] == 'semanal':
         return f'los {DIAS_SEMANA_BONITOS[fecha.weekday()]}'
     if evento['repeticion'] == 'anual':

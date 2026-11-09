@@ -1,4 +1,5 @@
 """Normalización de texto e interpretación de fechas en español, sin dependencias externas."""
+import calendar
 from datetime import date, datetime, time, timedelta
 import re
 import unicodedata
@@ -312,8 +313,13 @@ _RANGO_HORAS = re.compile(
 _DIAS_REPETIDOS = re.compile(
     r'(?:todos\s+los|cada|los)\s+(?P<dias>(?:' + _DIAS_RE + r')(?:\s*(?:,|y)\s*(?:los\s+)?(?:' + _DIAS_RE + r'))*)'
 )
-_REPETICION = re.compile(r'(?P<semanal>cada\s+semana|todas\s+las\s+semanas|semanalmente)|'
+_REPETICION = re.compile(r'(?P<diaria>todos\s+los\s+dias|cada\s+dia|a\s+diario|diariamente)|'
+                         r'(?P<semanal>cada\s+semana|todas\s+las\s+semanas|semanalmente)|'
+                         r'(?P<mensual>cada\s+mes|todos\s+los\s+meses|mensualmente)|'
                          r'(?P<anual>cada\s+ano|todos\s+los\s+anos|anualmente)')
+# "el día 5 de cada mes", "el 5 de cada mes", "los días 5 (de cada mes)"
+_DIA_DEL_MES = re.compile(r'(?:el\s+)?(?:dia\s+)?(?P<n>\d{1,2})\s+de\s+cada\s+mes|'
+                          r'(?:todos\s+)?los\s+dias\s+(?P<n2>\d{1,2})(?:\s+de\s+cada\s+mes)?\b')
 _HASTA = re.compile(r'hasta\s+(?:el\s+)?(?!las?\s)')
 
 
@@ -359,12 +365,13 @@ def extraer_horario(texto):
 
 
 def extraer_repeticion(texto, hoy):
-    """Devuelve (dias_semana, repeticion, hasta, resto).
+    """Devuelve (dias_semana, repeticion, hasta, resto, dia_del_mes).
 
     'los lunes y miércoles' -> ([0, 2], 'semanal', ...); 'cada año' -> ([], 'anual', ...);
+    'todos los días' -> 'diaria'; 'el día 5 de cada mes' -> 'mensual' con dia_del_mes = 5;
     'hasta el 18 de diciembre' -> hasta = date(…, 12, 18).
     """
-    dias, repeticion, hasta = [], '', None
+    dias, repeticion, hasta, dia_mes = [], '', None, None
 
     m = _HASTA.search(normalizar(texto))
     if m:
@@ -378,6 +385,11 @@ def extraer_repeticion(texto, hoy):
                 texto = _limpiar(texto, m.start(), fin)
                 break
 
+    m = _DIA_DEL_MES.search(normalizar(texto))
+    if m and 1 <= int(m.group('n') or m.group('n2')) <= 31:
+        dia_mes, repeticion = int(m.group('n') or m.group('n2')), 'mensual'
+        texto = _limpiar(texto, m.start(), m.end())
+
     m = _DIAS_REPETIDOS.search(normalizar(texto))
     if m:
         dias = sorted({DIAS_SEMANA.index(d) for d in re.findall(_DIAS_RE, m.group('dias'))})
@@ -386,10 +398,21 @@ def extraer_repeticion(texto, hoy):
 
     m = _REPETICION.search(normalizar(texto))
     if m:
-        repeticion = 'semanal' if m.group('semanal') else 'anual'
+        repeticion = next(r for r in ('diaria', 'semanal', 'mensual', 'anual') if m.group(r))
         texto = _limpiar(texto, m.start(), m.end())
 
-    return dias, repeticion, hasta, texto
+    return dias, repeticion, hasta, texto, dia_mes
+
+
+def proximo_dia_del_mes(hoy, dia):
+    """Hoy o el siguiente día «dia» de un mes (el último del mes si ese mes es más corto)."""
+    for meses in range(13):
+        total = hoy.year * 12 + hoy.month - 1 + meses
+        anio, mes = total // 12, total % 12 + 1
+        fecha = date(anio, mes, min(dia, calendar.monthrange(anio, mes)[1]))
+        if fecha >= hoy:
+            return fecha
+    return hoy
 
 
 def proximo_dia(hoy, indice):

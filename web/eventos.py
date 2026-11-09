@@ -4,7 +4,10 @@ from datetime import date, datetime, timedelta
 import db
 
 CATEGORIAS = ['Clase', 'Cumpleaños', 'Reunión', 'Examen', 'Otro']
-REPETICIONES = {'': 'No se repite', 'semanal': 'Cada semana', 'anual': 'Cada año'}
+REPETICIONES = {'': 'No se repite', 'diaria': 'Cada día', 'semanal': 'Cada semana', 'mensual': 'Cada mes',
+                'anual': 'Cada año'}
+# Las que pueden tener fecha de fin y partirse en "este y los siguientes" (los cumpleaños no)
+CON_FIN = ('diaria', 'semanal', 'mensual')
 EMOJI_CATEGORIA = {'Clase': '📚', 'Cumpleaños': '🎂', 'Reunión': '👥', 'Examen': '📝', 'Otro': '📌'}
 
 
@@ -44,7 +47,7 @@ def validar(datos):
     if repeticion not in REPETICIONES:
         raise ValueError('Repetición no válida')
 
-    hasta = (datos.get('hasta') or '') if repeticion == 'semanal' else ''
+    hasta = (datos.get('hasta') or '') if repeticion in CON_FIN else ''
     if hasta:
         try:
             fin = date.fromisoformat(hasta)
@@ -65,11 +68,40 @@ def _mismo_dia_en(anio, fecha):
         return fecha.replace(year=anio, day=28)
 
 
+def dia_del_mes(anio, mes, dia):
+    """El día «dia» de ese mes; si el mes es más corto (el 31 en abril), su último día."""
+    for d in range(dia, 27, -1):
+        try:
+            return date(anio, mes, d)
+        except ValueError:
+            continue
+    return date(anio, mes, min(dia, 28))
+
+
+def sumar_meses(fecha, meses, dia=None):
+    total = fecha.year * 12 + fecha.month - 1 + meses
+    return dia_del_mes(total // 12, total % 12 + 1, dia or fecha.day)
+
+
 def _fechas(evento, desde, hasta):
     inicio = date.fromisoformat(evento['fecha'])
-    if evento['repeticion'] == 'semanal':
-        if evento['hasta']:
-            hasta = min(hasta, date.fromisoformat(evento['hasta']))
+    if evento['repeticion'] in CON_FIN and evento['hasta']:
+        hasta = min(hasta, date.fromisoformat(evento['hasta']))
+    if evento['repeticion'] == 'diaria':
+        dia = max(inicio, desde)
+        while dia <= hasta:
+            yield dia
+            dia += timedelta(days=1)
+    elif evento['repeticion'] == 'mensual':
+        # Cada mes el mismo día que el primero (o el último día, si ese mes no lo tiene)
+        meses = max(0, (desde.year - inicio.year) * 12 + desde.month - inicio.month)
+        dia = sumar_meses(inicio, meses)
+        while dia <= hasta:
+            if dia >= desde:
+                yield dia
+            meses += 1
+            dia = sumar_meses(inicio, meses)
+    elif evento['repeticion'] == 'semanal':
         primera = inicio if desde <= inicio else inicio + timedelta(weeks=-(-(desde - inicio).days // 7))
         while primera <= hasta:
             yield primera
@@ -131,8 +163,8 @@ def borrar(evento, alcance='serie', dia=None):
     if alcance == 'uno':
         db.anadir_excepcion(evento['id'], dia)
     elif alcance == 'siguientes':
-        if evento['repeticion'] != 'semanal':
-            raise ValueError('«Este y los siguientes» solo vale para eventos semanales')
+        if evento['repeticion'] not in CON_FIN:
+            raise ValueError('«Este y los siguientes» no vale para los que se repiten cada año')
         if dia <= date.fromisoformat(evento['fecha']):
             db.borrar_evento(evento['id'])  # desde el primero: es toda la serie
         else:
@@ -156,8 +188,8 @@ def modificar(evento, datos, alcance='serie', dia=None):
         db.anadir_excepcion(evento['id'], dia)
         return db.guardar_evento(nuevo)
     if alcance == 'siguientes':
-        if evento['repeticion'] != 'semanal':
-            raise ValueError('«Este y los siguientes» solo vale para eventos semanales')
+        if evento['repeticion'] not in CON_FIN:
+            raise ValueError('«Este y los siguientes» no vale para los que se repiten cada año')
         nuevo = validar(dict(datos, fecha=datos.get('fecha') or dia.isoformat()))
         borrar(evento, 'siguientes', dia)
         return db.guardar_evento(nuevo)

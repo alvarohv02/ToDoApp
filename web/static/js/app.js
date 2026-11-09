@@ -155,8 +155,13 @@ async function cargarEventos(desde, hasta) {
   }
 }
 
+// Las que pueden tener fecha de fin y partirse en "este y los siguientes" (los cumpleaños no)
+const REPETICIONES_CON_FIN = ['diaria', 'semanal', 'mensual'];
+
 function crearEtiquetaEvento(evento, alPulsar) {
-  const repeticion = { semanal: 'Se repite cada semana', anual: 'Se repite cada año' }[evento.repeticion];
+  const repeticion = {
+    diaria: 'Se repite cada día', semanal: 'Se repite cada semana', mensual: 'Se repite cada mes', anual: 'Se repite cada año',
+  }[evento.repeticion];
   const detalle = [`${EMOJI_CATEGORIA[evento.categoria] || '📌'} ${evento.categoria}: ${evento.titulo}`, horarioEvento(evento), repeticion, 'Pulsa para editar']
     .filter(Boolean).join('\n');
   const article = crearChip(`calendar-event categoria-${CLASE_CATEGORIA[evento.categoria] || 'otro'}`,
@@ -217,7 +222,7 @@ async function renderizarCalendario() {
   // --- Formulario de eventos ---
 
   function actualizarCampoHasta() {
-    campoHasta.hidden = form.elements.repeticion.value !== 'semanal';
+    campoHasta.hidden = !REPETICIONES_CON_FIN.includes(form.elements.repeticion.value);
   }
 
   // En un evento que se repite: "solo este día", "este y los siguientes" o "toda la serie"
@@ -269,7 +274,7 @@ async function renderizarCalendario() {
     bloqueAlcance.hidden = !ocurrencia;
     if (ocurrencia) {
       textoSoloEste.textContent = `Solo este día (${formatearFecha(ocurrencia)})`;
-      opcionSiguientes.hidden = eventoEditando.repeticion !== 'semanal';
+      opcionSiguientes.hidden = !REPETICIONES_CON_FIN.includes(eventoEditando.repeticion);
       form.elements.alcance.value = 'uno';
     }
     form.elements.titulo.value = datos.titulo || '';

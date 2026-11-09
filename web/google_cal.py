@@ -187,8 +187,12 @@ def cuerpo_evento(evento, google_id=None):
         'extendedProperties': {'private': {'miNotion': 'evento', 'categoria': evento['categoria']}},
         'recurrence': [],
     }
-    if evento['repeticion'] == 'semanal':
-        regla = 'RRULE:FREQ=WEEKLY'
+    if evento['repeticion'] in eventos.CON_FIN:
+        regla = 'RRULE:FREQ=' + {'diaria': 'DAILY', 'semanal': 'WEEKLY', 'mensual': 'MONTHLY'}[evento['repeticion']]
+        dia = date.fromisoformat(evento['fecha']).day
+        if evento['repeticion'] == 'mensual' and dia > 28:
+            # "El 31 de cada mes": en los meses más cortos, su último día (como en la app)
+            regla += f';BYMONTHDAY={",".join(str(d) for d in range(28, dia + 1))};BYSETPOS=-1'
         if evento['hasta']:
             hasta = date.fromisoformat(evento['hasta'])
             regla += f';UNTIL={hasta:%Y%m%d}' if not evento['hora_inicio'] else f';UNTIL={hasta:%Y%m%d}T235959Z'
@@ -238,6 +242,21 @@ def _local(valor):
     return momento.date().isoformat(), momento.strftime('%H:%M')
 
 
+def _regla_simple(frecuencia, reglas, fecha):
+    """True si la regla es la que usa la app: un solo día de la semana, o el mismo día de cada mes."""
+    if frecuencia == 'WEEKLY':
+        return len(reglas.get('BYDAY', 'X').split(',')) == 1
+    if frecuencia == 'MONTHLY':
+        dia = date.fromisoformat(fecha).day
+        por_dia = reglas.get('BYMONTHDAY')
+        if 'BYDAY' in reglas:
+            return False  # "el primer lunes de cada mes"
+        if por_dia is None or por_dia == str(dia):
+            return True
+        return reglas.get('BYSETPOS') == '-1' and por_dia == ','.join(str(d) for d in range(28, dia + 1))
+    return 'BYDAY' not in reglas
+
+
 def leer_evento_google(item, categoria_calendario=None):
     """Evento de Google -> datos de un evento de la app. Devuelve (datos, excepciones) o (None, None) si no se admite."""
     fecha, hora_inicio = _local(item['start'])
@@ -251,17 +270,22 @@ def leer_evento_google(item, categoria_calendario=None):
         if linea.startswith('RRULE:'):
             reglas = dict(p.split('=', 1) for p in linea[6:].split(';') if '=' in p)
             frecuencia = reglas.get('FREQ')
-            if frecuencia == 'WEEKLY' and int(reglas.get('INTERVAL', '1')) == 1 and len(reglas.get('BYDAY', 'X').split(',')) == 1:
-                datos['repeticion'] = 'semanal'
+            cada_uno = int(reglas.get('INTERVAL', '1')) == 1
+            if frecuencia in ('DAILY', 'WEEKLY', 'MONTHLY') and cada_uno and _regla_simple(frecuencia, reglas, fecha):
+                datos['repeticion'] = {'DAILY': 'diaria', 'WEEKLY': 'semanal', 'MONTHLY': 'mensual'}[frecuencia]
                 if 'UNTIL' in reglas:
                     u = reglas['UNTIL']
                     datos['hasta'] = f'{u[:4]}-{u[4:6]}-{u[6:8]}'
                 elif 'COUNT' in reglas:
-                    datos['hasta'] = (date.fromisoformat(fecha) + timedelta(weeks=int(reglas['COUNT']) - 1)).isoformat()
-            elif frecuencia == 'YEARLY' and int(reglas.get('INTERVAL', '1')) == 1 and 'COUNT' not in reglas:
+                    veces, inicio = int(reglas['COUNT']) - 1, date.fromisoformat(fecha)
+                    ultimo = {'DAILY': lambda: inicio + timedelta(days=veces),
+                              'WEEKLY': lambda: inicio + timedelta(weeks=veces),
+                              'MONTHLY': lambda: eventos.sumar_meses(inicio, veces)}[frecuencia]()
+                    datos['hasta'] = ultimo.isoformat()
+            elif frecuencia == 'YEARLY' and cada_uno and 'COUNT' not in reglas:
                 datos['repeticion'] = 'anual'
             else:
-                return None, None  # repetición que la app no sabe representar (diaria, varios días por semana...)
+                return None, None  # repetición que la app no sabe representar (cada 2 semanas, varios días...)
         elif linea.startswith('EXDATE'):
             for valor in linea.split(':', 1)[1].split(','):
                 excepciones.add(f'{valor[:4]}-{valor[4:6]}-{valor[6:8]}')
