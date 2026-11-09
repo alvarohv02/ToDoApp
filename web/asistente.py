@@ -171,6 +171,15 @@ def _titulo_periodo(periodo, desde=None, hasta=None):
     return periodo.replace('proxima', 'próxima').capitalize()
 
 
+def resumen_del_dia(telefono, hoy):
+    """El mensaje de buenos días: lo de hoy (eventos, tareas, avisos y lo atrasado)."""
+    dia = f'{DIAS_SEMANA_BONITOS[hoy.weekday()].capitalize()} {hoy:%d/%m}'
+    agenda = _agenda(telefono, dia, hoy, hoy, hoy, con_atrasadas=True)
+    if agenda is None:
+        return f'☀️ ¡Buenos días! Hoy, {dia.lower()}, no tienes nada en la agenda 🎉' + _aviso_sin_fecha()
+    return f'☀️ ¡Buenos días! Esto es lo que tienes hoy:\n\n{agenda}' + _aviso_sin_fecha()
+
+
 def _saludo(telefono, hoy):
     agenda = _agenda(telefono, 'Hoy', hoy, hoy, hoy, con_atrasadas=True)
     if agenda is None:

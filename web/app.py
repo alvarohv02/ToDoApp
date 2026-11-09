@@ -13,6 +13,7 @@ import copias
 import db
 import eventos
 import google_cal
+import resumen
 import telegram_bot
 from whatsapp import whatsapp_bp
 
@@ -207,6 +208,7 @@ if os.getenv('FLASK_DEBUG') != '1' or os.getenv('WERKZEUG_RUN_MAIN') == 'true':
     avisos.arrancar_en_segundo_plano()
     google_cal.arrancar_en_segundo_plano()
     copias.arrancar_en_segundo_plano()
+    resumen.arrancar_en_segundo_plano()
 
 if __name__ == '__main__':
     # Desarrollo en local. En el servidor se ejecuta con Docker (ver docker-compose.yml)
