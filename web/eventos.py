@@ -127,7 +127,8 @@ def en_rango(desde, hasta):
         for dia in _fechas(evento, desde, hasta):
             if dia.isoformat() not in quitados:
                 ocurrencias.append(dict(evento, fecha=dia.isoformat(), fecha_inicio=evento['fecha']))
-    return sorted(ocurrencias, key=lambda e: (e['fecha'], e['hora_inicio'] or '99', e['titulo']))
+    # Los de todo el día (sin hora) van primero en su día
+    return sorted(ocurrencias, key=lambda e: (e['fecha'], e['hora_inicio'], e['titulo']))
 
 
 def horario(evento):

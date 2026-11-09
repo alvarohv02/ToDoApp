@@ -410,10 +410,15 @@ async function renderizarCalendario() {
 
       dayCell.appendChild(dayNumber);
 
+      // Primero lo de todo el día (eventos y luego tareas sin hora); después lo que tiene hora, en orden
       const etiquetas = [
-        ...eventosDelDia.map((evento) => crearEtiquetaEvento(evento, abrirFormulario)),
-        ...tareasDelDia.map((tarea) => crearEtiquetaTarea(tarea))
-      ];
+        ...eventosDelDia.map((evento) => ({
+          orden: evento.hora_inicio ? `2 ${evento.hora_inicio}` : '0', el: crearEtiquetaEvento(evento, abrirFormulario)
+        })),
+        ...tareasDelDia.map((tarea) => ({
+          orden: tarea.hora_limite ? `2 ${tarea.hora_limite}` : '1', el: crearEtiquetaTarea(tarea)
+        }))
+      ].sort((a, b) => a.orden.localeCompare(b.orden)).map((x) => x.el);
       etiquetas.forEach((etiqueta, indice) => {
         if (indice >= MAX_ETIQUETAS_DIA) {
           etiqueta.classList.add('is-extra');
