@@ -1,5 +1,5 @@
 """Envía los recordatorios cuando llega su hora, por Telegram o por WhatsApp."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import os
 import threading
@@ -25,6 +25,15 @@ def _texto_aviso(recordatorio, ahora):
         # El servidor estuvo apagado o reiniciándose a la hora del aviso
         texto += f'\n\n_(con retraso: era para el {cuando:%d/%m} a las {cuando:%H:%M})_'
     return texto
+
+
+def ventana_hasta(telefono):
+    """Hasta cuándo (hora local) se le puede escribir por WhatsApp sin plantilla, o None si nunca escribió."""
+    ultimo = db.ultimo_mensaje_usuario(telefono)  # en UTC, lo escribe SQLite
+    if not ultimo:
+        return None
+    momento = datetime.strptime(ultimo, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).astimezone()
+    return momento.replace(tzinfo=None) + VENTANA_WHATSAPP
 
 
 def _dentro_de_ventana(telefono):

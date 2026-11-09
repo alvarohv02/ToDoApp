@@ -1109,7 +1109,19 @@ function crearElemento(etiqueta, clase, texto) {
   return elemento;
 }
 
-function crearTarjetaRecordatorio(recordatorio, alCambiar) {
+// Etiqueta del canal de un recordatorio (y opciones para cambiarlo)
+const EMOJI_CANAL = { WhatsApp: '💬', Telegram: '✈️' };
+
+function opcionesCanal(canales, recordatorio) {
+  const opciones = canales.map((c) => ({ valor: c.destino, texto: `${EMOJI_CANAL[c.canal] || ''} ${c.etiqueta}` }));
+  if (recordatorio && !opciones.some((o) => o.valor === recordatorio.destino)) {
+    // Un chat que ya no está en la configuración: se mantiene como opción para no cambiarlo sin querer
+    opciones.unshift({ valor: recordatorio.destino, texto: `${EMOJI_CANAL[recordatorio.canal] || ''} ${recordatorio.canal}` });
+  }
+  return opciones;
+}
+
+function crearTarjetaRecordatorio(recordatorio, alCambiar, canales = []) {
   const tarjeta = crearElemento('article', `reminder-card is-${{ enviado: 'sent', error: 'error' }[recordatorio.estado] || 'pending'}`);
 
   const columnaTexto = crearElemento('div');
@@ -1121,6 +1133,15 @@ function crearTarjetaRecordatorio(recordatorio, alCambiar) {
   const etiquetasEstado = { pendiente: 'Pendiente', enviado: 'Enviado', error: 'No se pudo enviar' };
   meta.append(crearElemento('span', `reminder-chip estado-${recordatorio.estado}`, etiquetasEstado[recordatorio.estado]));
   columnaTexto.append(inputTexto, meta);
+
+  const selectCanal = crearElemento('select', 'input reminder-canal');
+  selectCanal.setAttribute('aria-label', 'Avisar por');
+  opcionesCanal(canales, recordatorio).forEach((o) => {
+    const opcion = crearElemento('option', '', o.texto);
+    opcion.value = o.valor;
+    selectCanal.append(opcion);
+  });
+  selectCanal.value = recordatorio.destino;
 
   const inputFecha = crearElemento('input');
   inputFecha.type = 'datetime-local';
@@ -1136,12 +1157,12 @@ function crearTarjetaRecordatorio(recordatorio, alCambiar) {
   acciones.append(botonGuardar, botonCancelar);
 
   const mensaje = crearElemento('p', 'reminder-feedback');
-  tarjeta.append(columnaTexto, inputFecha, acciones, mensaje);
+  tarjeta.append(columnaTexto, inputFecha, selectCanal, acciones, mensaje);
 
-  const hayCambios = () =>
-    inputTexto.value.trim() !== recordatorio.texto || inputFecha.value !== recordatorio.cuando;
-  [inputTexto, inputFecha].forEach((input) =>
-    input.addEventListener('input', () => {
+  const hayCambios = () => inputTexto.value.trim() !== recordatorio.texto
+    || inputFecha.value !== recordatorio.cuando || selectCanal.value !== recordatorio.destino;
+  [inputTexto, inputFecha, selectCanal].forEach((input) =>
+    input.addEventListener(input === selectCanal ? 'change' : 'input', () => {
       botonGuardar.disabled = !hayCambios();
       mensaje.textContent = '';
     })
@@ -1158,7 +1179,7 @@ function crearTarjetaRecordatorio(recordatorio, alCambiar) {
       await peticionRecordatorio(`${API_REMINDERS_URL}/${recordatorio.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texto: inputTexto.value.trim(), cuando: inputFecha.value })
+        body: JSON.stringify({ texto: inputTexto.value.trim(), cuando: inputFecha.value, destino: selectCanal.value })
       });
       await alCambiar();
     } catch (error) {
@@ -1185,6 +1206,133 @@ function crearTarjetaRecordatorio(recordatorio, alCambiar) {
   return tarjeta;
 }
 
+function dosCifras(n) {
+  return String(n).padStart(2, '0');
+}
+
+// Fecha y hora de un atajo ("en 1 hora", "mañana a las 9"...)
+function momentoAtajo(atajo) {
+  const ahora = new Date();
+  const momento = new Date(ahora);
+  momento.setSeconds(0, 0);
+  const a = (dias, hora) => {
+    momento.setDate(momento.getDate() + dias);
+    momento.setHours(hora, 0);
+  };
+  if (atajo === '30m') {
+    momento.setMinutes(momento.getMinutes() + 30);
+  } else if (atajo === '1h') {
+    momento.setHours(momento.getHours() + 1);
+  } else if (atajo === 'tarde') {
+    a(ahora.getHours() >= 18 ? 1 : 0, 18);
+  } else if (atajo === 'manana9') {
+    a(1, 9);
+  } else if (atajo === 'manana18') {
+    a(1, 18);
+  } else if (atajo === 'lunes9') {
+    a(((8 - ahora.getDay()) % 7) || 7, 9);
+  }
+  return momento;
+}
+
+function iniciarFormularioRecordatorio(raiz, canales, alCrear) {
+  const form = raiz.querySelector('[data-reminder-form]');
+  if (!form) {
+    return;
+  }
+  const contenedorCanales = form.querySelector('[data-reminder-canales]');
+  const aviso = form.querySelector('[data-reminder-aviso]');
+  const errorForm = form.querySelector('[data-reminder-error]');
+  let guardado = null;
+  try {
+    guardado = window.localStorage.getItem('canalRecordatorio');
+  } catch (error) {
+    // sin almacenamiento: se usa el primero
+  }
+
+  if (!canales.length) {
+    contenedorCanales.replaceChildren(crearElemento('p', 'card-text', 'No hay WhatsApp ni Telegram configurados en el servidor.'));
+  } else {
+    contenedorCanales.replaceChildren(...canales.map((canal, i) => {
+      const opcion = crearElemento('label', 'canal-opcion');
+      const radio = crearElemento('input');
+      radio.type = 'radio';
+      radio.name = 'destino';
+      radio.value = canal.destino;
+      radio.checked = guardado ? canal.destino === guardado : i === 0;
+      opcion.append(radio, crearElemento('span', '', `${EMOJI_CANAL[canal.canal] || ''} ${canal.etiqueta}`));
+      return opcion;
+    }));
+    if (!form.querySelector('input[name=destino]:checked')) {
+      form.querySelector('input[name=destino]').checked = true;
+    }
+  }
+
+  function ponerMomento(momento) {
+    form.elements.dia.value = claveFecha(momento);
+    form.elements.hora.value = `${dosCifras(momento.getHours())}:${dosCifras(momento.getMinutes())}`;
+    revisarAviso();
+  }
+
+  // WhatsApp solo deja que el bot escriba si le has escrito en las 24 h anteriores
+  function revisarAviso() {
+    const elegido = form.querySelector('input[name=destino]:checked');
+    const canal = canales.find((c) => elegido && c.destino === elegido.value);
+    const cuando = form.elements.dia.value && form.elements.hora.value
+      ? `${form.elements.dia.value}T${form.elements.hora.value}` : '';
+    let texto = '';
+    if (canal && canal.canal === 'WhatsApp' && !canal.plantilla && cuando) {
+      if (!canal.ventana_hasta || cuando > canal.ventana_hasta) {
+        const limite = canal.ventana_hasta
+          ? ` Ahora mismo, tu último mensaje permite avisos hasta el ${formatearMomento(canal.ventana_hasta)}.`
+          : ' Todavía no le has escrito nunca por WhatsApp.';
+        texto = '⚠️ Por WhatsApp solo te llegará si le escribes algo al bot en las 24 h anteriores al aviso.'
+          + `${limite} Si no quieres estar pendiente, elige Telegram.`;
+      }
+    }
+    aviso.textContent = texto;
+    aviso.hidden = !texto;
+  }
+
+  ponerMomento(momentoAtajo('1h'));
+  form.querySelectorAll('[data-atajo]').forEach((boton) =>
+    boton.addEventListener('click', () => ponerMomento(momentoAtajo(boton.dataset.atajo))));
+  form.addEventListener('change', revisarAviso);
+  form.addEventListener('input', () => { errorForm.textContent = ''; });
+
+  form.addEventListener('submit', async (envio) => {
+    envio.preventDefault();
+    const elegido = form.querySelector('input[name=destino]:checked');
+    const boton = form.querySelector('[type=submit]');
+    boton.disabled = true;
+    try {
+      const creado = await peticionRecordatorio(API_REMINDERS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          texto: form.elements.texto.value.trim(),
+          cuando: `${form.elements.dia.value}T${form.elements.hora.value}`,
+          destino: elegido ? elegido.value : ''
+        })
+      });
+      try {
+        window.localStorage.setItem('canalRecordatorio', creado.destino);
+      } catch (error) {
+        // sin almacenamiento: no se recuerda el canal
+      }
+      form.elements.texto.value = '';
+      errorForm.className = 'event-form-error reminder-field-wide is-ok';
+      errorForm.textContent = `✓ Te avisaré el ${formatearMomento(creado.cuando)} por ${creado.canal}.`;
+      await alCrear();
+    } catch (error) {
+      errorForm.className = 'event-form-error reminder-field-wide';
+      errorForm.textContent = error.message;
+    } finally {
+      boton.disabled = false;
+    }
+  });
+}
+
 async function renderizarRecordatorios() {
   const raiz = document.querySelector('#reminders-app');
   if (!raiz) {
@@ -1195,6 +1343,8 @@ async function renderizarRecordatorios() {
   const listaHechos = raiz.querySelector('[data-reminders-done-list]');
   const contador = raiz.querySelector('[data-reminders-pending]');
   const proximo = raiz.querySelector('[data-reminders-next]');
+  const canales = await peticionRecordatorio(`${API_REMINDERS_URL}/canales`).catch(() => []);
+  iniciarFormularioRecordatorio(raiz, canales, () => recargar());
 
   async function recargar() {
     let recordatorios = [];
@@ -1213,12 +1363,12 @@ async function renderizarRecordatorios() {
 
     listaPendientes.replaceChildren(
       ...(pendientes.length
-        ? pendientes.map((r) => crearTarjetaRecordatorio(r, recargar))
+        ? pendientes.map((r) => crearTarjetaRecordatorio(r, recargar, canales))
         : [crearElemento('p', 'calendar-empty-state', 'No hay recordatorios pendientes. Pídeselos al bot: "recuérdame mañana a las 10 que…"')])
     );
     listaHechos.replaceChildren(
       ...(hechos.length
-        ? hechos.map((r) => crearTarjetaRecordatorio(r, recargar))
+        ? hechos.map((r) => crearTarjetaRecordatorio(r, recargar, canales))
         : [crearElemento('p', 'calendar-empty-state', 'Nada enviado en los últimos 30 días.')])
     );
   }

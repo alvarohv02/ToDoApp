@@ -121,7 +121,46 @@ def recordatorio_a_json(recordatorio):
         'cuando': recordatorio['cuando'].replace(' ', 'T'),
         'estado': recordatorio['estado'],
         'canal': 'Telegram' if recordatorio['destino'].startswith('tg:') else 'WhatsApp',
+        'destino': recordatorio['destino'],
     }
+
+
+def canales_recordatorio():
+    """Chats a los que se pueden mandar avisos desde la web: los de WhatsApp y Telegram configurados."""
+    whatsapp = [n.strip() for n in os.getenv('WHATSAPP_ALLOWED_NUMBERS', '').split(',') if n.strip()]         if os.getenv('TOKEN') and os.getenv('WHATSAPP_PHONE_NUMBER_ID') else []
+    telegram = [u.strip() for u in os.getenv('TELEGRAM_ALLOWED_USERS', '').split(',') if u.strip().isdigit()]         if os.getenv('TELEGRAM_TOKEN') else []
+    canales = []
+    for numero in whatsapp:
+        hasta = avisos.ventana_hasta(numero)
+        canales.append({
+            'destino': numero, 'canal': 'WhatsApp',
+            'etiqueta': 'WhatsApp' + (f' · …{numero[-3:]}' if len(whatsapp) > 1 else ''),
+            # Sin plantilla, WhatsApp solo entrega si has escrito al bot en las 24 h anteriores al aviso
+            'ventana_hasta': hasta.isoformat(timespec='minutes') if hasta else None,
+            'plantilla': bool(os.getenv('WHATSAPP_REMINDER_TEMPLATE')),
+        })
+    for usuario in telegram:
+        canales.append({'destino': f'tg:{usuario}', 'canal': 'Telegram',
+                        'etiqueta': 'Telegram' + (f' · …{usuario[-3:]}' if len(telegram) > 1 else ''),
+                        'ventana_hasta': None, 'plantilla': True})
+    return canales
+
+
+def leer_recordatorio(payload, destino_actual=None):
+    """Valida lo que manda la web. Devuelve (texto, cuando, destino) o lanza ValueError."""
+    texto = (payload.get('texto') or '').strip()
+    if not texto:
+        raise ValueError('El recordatorio necesita un texto')
+    try:
+        cuando = datetime.strptime((payload.get('cuando') or '')[:16], '%Y-%m-%dT%H:%M')
+    except ValueError as error:
+        raise ValueError('Fecha y hora no válidas') from error
+    if cuando <= datetime.now():
+        raise ValueError('La fecha y hora deben ser futuras')
+    destino = payload.get('destino') or destino_actual
+    if destino != destino_actual and destino not in {c['destino'] for c in canales_recordatorio()}:
+        raise ValueError('Elige si quieres el aviso por WhatsApp o por Telegram')
+    return texto, cuando, destino
 
 
 @app.route('/api/eventos', methods=['GET', 'POST'])
@@ -185,9 +224,21 @@ def google_sincronizar():
     return jsonify({**google_cal.estado, 'configurado': True})
 
 
-@app.route('/api/recordatorios', methods=['GET'])
+@app.route('/api/recordatorios', methods=['GET', 'POST'])
 def recordatorios_api():
+    if request.method == 'POST':
+        try:
+            texto, cuando, destino = leer_recordatorio(request.get_json(silent=True) or {})
+        except ValueError as error:
+            return jsonify({'error': str(error)}), 400
+        nuevo = db.crear_recordatorio(destino, texto, cuando)
+        return jsonify(recordatorio_a_json(db.obtener_recordatorio(nuevo))), 201
     return jsonify([recordatorio_a_json(r) for r in db.listar_recordatorios()])
+
+
+@app.route('/api/recordatorios/canales')
+def recordatorios_canales():
+    return jsonify(canales_recordatorio())
 
 
 @app.route('/api/recordatorios/<int:recordatorio_id>', methods=['PUT', 'DELETE'])
@@ -201,11 +252,9 @@ def recordatorio_api(recordatorio_id):
         return '', 204
 
     try:
-        cuando = datetime.strptime((payload.get('cuando') or '')[:16], '%Y-%m-%dT%H:%M')
-    except ValueError:
-        return jsonify({'error': 'Fecha y hora no válidas'}), 400
-    if cuando <= datetime.now():
-        return jsonify({'error': 'La fecha y hora deben ser futuras'}), 400
+        texto, cuando, destino = leer_recordatorio(request.get_json(silent=True) or {}, recordatorio['destino'])
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
 
     db.editar_recordatorio(recordatorio_id, texto, cuando, destino)
     return jsonify(recordatorio_a_json(db.obtener_recordatorio(recordatorio_id)))

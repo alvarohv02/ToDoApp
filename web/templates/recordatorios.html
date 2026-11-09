@@ -7,9 +7,52 @@
         <div>
             <p class="eyebrow">Recordatorios</p>
             <h1>Lo que el bot te va a avisar</h1>
-            <p class="page-subtitle">Se crean hablando con el bot («recuérdame mañana a las 10 que…»). Aquí puedes cambiar el texto o la hora, o cancelarlos.</p>
+            <p class="page-subtitle">Créalos aquí o hablando con el bot («recuérdame mañana a las 10 que…»), y cámbialos o cancélalos cuando quieras.</p>
         </div>
     </header>
+
+    <section class="card">
+        <div class="card-header">
+            <div>
+                <h2 class="card-title">Nuevo recordatorio</h2>
+                <p class="card-text">El bot te escribirá a esa hora por el canal que elijas.</p>
+            </div>
+        </div>
+        <form class="reminder-form" data-reminder-form>
+            <label class="field reminder-field-wide">
+                <span>¿Qué te recuerdo?</span>
+                <input class="input" name="texto" required maxlength="300" placeholder="Llamar al dentista, sacar la basura…">
+            </label>
+            <label class="field">
+                <span>Día</span>
+                <input class="input" type="date" name="dia" required>
+            </label>
+            <label class="field">
+                <span>Hora</span>
+                <input class="input" type="time" name="hora" required>
+            </label>
+            <div class="field">
+                <span>Avisar por</span>
+                <div class="canal-opciones" data-reminder-canales></div>
+            </div>
+            <div class="field reminder-field-wide">
+                <span>Atajos</span>
+                <div class="reminder-atajos" data-reminder-atajos>
+                    <button type="button" class="chip-filtro" data-atajo="30m">En 30 min</button>
+                    <button type="button" class="chip-filtro" data-atajo="1h">En 1 hora</button>
+                    <button type="button" class="chip-filtro" data-atajo="tarde">Esta tarde (18:00)</button>
+                    <button type="button" class="chip-filtro" data-atajo="manana9">Mañana a las 9:00</button>
+                    <button type="button" class="chip-filtro" data-atajo="manana18">Mañana a las 18:00</button>
+                    <button type="button" class="chip-filtro" data-atajo="lunes9">El lunes a las 9:00</button>
+                </div>
+            </div>
+            <p class="reminder-aviso reminder-field-wide" data-reminder-aviso hidden></p>
+            <p class="event-form-error reminder-field-wide" data-reminder-error></p>
+            <div class="event-form-actions reminder-field-wide">
+                <button type="submit" class="btn btn-primary">⏰ Crear recordatorio</button>
+            </div>
+        </form>
+    </section>
 
     <section class="stats stats-compact" aria-label="Resumen">
         <div class="stat stat-accent">

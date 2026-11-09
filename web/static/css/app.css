@@ -1891,6 +1891,66 @@ tbody tr:last-child td {
    Recordatorios
    ========================================================================== */
 
+.reminder-form {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.9rem 1rem;
+}
+
+.reminder-field-wide {
+    grid-column: 1 / -1;
+}
+
+.canal-opciones,
+.reminder-atajos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.canal-opcion {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    font-size: 0.9rem;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.canal-opcion:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.canal-opcion input {
+    margin: 0;
+    accent-color: var(--accent);
+}
+
+.reminder-aviso {
+    margin: 0;
+    padding: 0.65rem 0.85rem;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+    color: color-mix(in srgb, var(--warning) 70%, var(--text));
+    font-size: 0.86rem;
+    font-weight: 600;
+}
+
+.event-form-error.is-ok {
+    color: var(--success);
+}
+
+.reminder-canal {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+}
+
 .reminder-list {
     display: flex;
     flex-direction: column;
@@ -1900,7 +1960,7 @@ tbody tr:last-child td {
 .reminder-card {
     --c: var(--accent);
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 230px auto;
+    grid-template-columns: minmax(0, 1fr) 210px 160px auto;
     align-items: center;
     gap: 0.8rem;
     padding: 0.85rem 0.95rem;
@@ -2069,6 +2129,10 @@ tbody tr:last-child td {
 
     .reminder-card {
         grid-template-columns: 1fr;
+    }
+
+    .reminder-form {
+        grid-template-columns: 1fr 1fr;
     }
 }
 

@@ -459,12 +459,14 @@ def obtener_recordatorio(recordatorio_id):
     return dict(row) if row else None
 
 
-def editar_recordatorio(recordatorio_id, texto, cuando):
-    """Cambia texto y hora; vuelve a dejarlo pendiente para que se envíe a la nueva hora."""
+def editar_recordatorio(recordatorio_id, texto, cuando, destino=None):
+    """Cambia texto, hora y (si se indica) el chat; vuelve a dejarlo pendiente para la nueva hora."""
+    _anotar_estado('recordatorios', recordatorio_id)
     with get_db_connection() as connection:
         connection.execute(
-            "UPDATE recordatorios SET texto = ?, cuando = ?, estado = 'pendiente', intentos = 0 WHERE id = ?",
-            (texto, cuando.strftime('%Y-%m-%d %H:%M'), recordatorio_id),
+            "UPDATE recordatorios SET texto = ?, cuando = ?, destino = COALESCE(?, destino), estado = 'pendiente', "
+            'intentos = 0 WHERE id = ?',
+            (texto, cuando.strftime('%Y-%m-%d %H:%M'), destino, recordatorio_id),
         )
         connection.commit()
 
