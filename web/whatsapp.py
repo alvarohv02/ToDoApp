@@ -3,10 +3,11 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import threading
 
 import requests
-from flask import Blueprint, abort, request
+from flask import Blueprint, Response, abort, request
 
 import asistente
 import db
@@ -104,12 +105,20 @@ def _procesar_audio(telefono, media_id):
 @whatsapp_bp.route('/webhook/', methods=['GET'])
 def verificar_webhook():
     # Meta llama aquí una vez al configurar el webhook en el panel de desarrolladores
-    if (
-        request.args.get('hub.mode') == 'subscribe'
-        and request.args.get('hub.verify_token') == _config('WHATSAPP_VERIFY_TOKEN')
-    ):
-        return request.args.get('hub.challenge', '')
-    return 'Error de autentificacion.', 403
+    esperado = _config('WHATSAPP_VERIFY_TOKEN') or ''
+    recibido = request.args.get('hub.verify_token') or ''
+    # Sin token configurado no se acepta nada (antes, None == None daba por buena cualquier petición)
+    if not (esperado and request.args.get('hub.mode') == 'subscribe'
+            and hmac.compare_digest(recibido.encode(), esperado.encode())):
+        return Response('Error de autentificacion.', status=403, mimetype='text/plain')
+
+    # Meta manda un número: se devuelve solo si lo parece, y como texto plano (nunca como HTML)
+    reto = request.args.get('hub.challenge', '')
+    if not re.fullmatch(r'[0-9A-Za-z_-]{1,128}', reto):
+        return Response('Reto no válido.', status=400, mimetype='text/plain')
+    respuesta = Response(reto, mimetype='text/plain')
+    respuesta.headers['X-Content-Type-Options'] = 'nosniff'
+    return respuesta
 
 
 @whatsapp_bp.route('/webhook/', methods=['POST'])
