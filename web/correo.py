@@ -19,6 +19,8 @@ import ssl
 import threading
 import time
 
+from db import DatosNoValidos
+
 log = logging.getLogger(__name__)
 
 MAX_POR_CUENTA = 50  # no leídos que se guardan de cada cuenta (los más recientes)
@@ -66,7 +68,7 @@ def configurado():
 def _cuenta(ident):
     cuenta = next((c for c in cuentas() if c['id'] == ident), None)
     if cuenta is None:
-        raise ValueError('Esa cuenta de correo no existe')
+        raise DatosNoValidos('Esa cuenta de correo no existe')
     return cuenta
 
 
@@ -84,7 +86,7 @@ class _IMAPPorIP(imaplib.IMAP4_SSL):
 
 def _conectar(cuenta):
     if not (cuenta['usuario'] and cuenta['clave'] and cuenta['servidor']):
-        raise ValueError('Falta el usuario, la contraseña o el servidor en el .env')
+        raise DatosNoValidos('Falta el usuario, la contraseña o el servidor en el .env')
     # Siempre se comprueba el certificado (imaplib, por defecto, no lo hace)
     contexto = ssl.create_default_context()
     if cuenta['ip']:
@@ -189,12 +191,16 @@ def actualizar(automatico=False):
 
 
 def _mensaje_error(error):
-    texto = str(error)
+    """Motivo para enseñar en la web o el bot; el detalle técnico solo va a los registros del servidor."""
+    if isinstance(error, DatosNoValidos):
+        return error.mensaje
     if _es_error_de_clave(error):
         return 'Usuario o contraseña de aplicación incorrectos'
+    if isinstance(error, ssl.SSLCertVerificationError):
+        return 'El certificado del servidor de correo no es válido'
     if isinstance(error, (OSError, TimeoutError)):
-        return f'No se pudo conectar con el servidor ({texto[:80]})'
-    return texto[:160]
+        return 'No se pudo conectar con el servidor de correo'
+    return 'Error del servidor de correo (detalles en los registros)'
 
 
 def resumen_cuentas():
@@ -266,7 +272,7 @@ def leer(ident, uid):
         _, datos = conexion.uid('FETCH', str(uid), '(BODY.PEEK[])')
         crudo = next((p[1] for p in datos if isinstance(p, tuple)), None)
         if crudo is None:
-            raise ValueError('Ese correo ya no está en la bandeja de entrada')
+            raise DatosNoValidos('Ese correo ya no está en la bandeja de entrada')
         mensaje = message_from_bytes(crudo)
         adjuntos = [_texto(p.get_filename()) for p in mensaje.walk() if p.get_filename()]
         return {**_resumen(str(uid), crudo, cuenta), 'para': _texto(mensaje['To']), 'texto': _cuerpo(mensaje),
@@ -307,7 +313,7 @@ def _mover(conexion, uid, carpeta):
 def accion(ident, uid, que):
     """'leido', 'archivar' o 'borrar' un correo de la bandeja de entrada."""
     if que not in ACCIONES:
-        raise ValueError('Acción no válida')
+        raise DatosNoValidos('Acción no válida')
     cuenta = _cuenta(ident)
     uid = str(uid)
     conexion = _conectar(cuenta)
@@ -318,7 +324,7 @@ def accion(ident, uid, que):
             carpeta = _carpeta_especial(conexion, '\\All', ()) if cuenta['servidor'] == 'imap.gmail.com' else \
                 _carpeta_especial(conexion, '\\Archive', ('archive', 'archivo', 'archived', 'archivados'))
             if carpeta is None:
-                raise ValueError('Esta cuenta no tiene carpeta de archivo: márcalo como leído o bórralo')
+                raise DatosNoValidos('Esta cuenta no tiene carpeta de archivo: márcalo como leído o bórralo')
             _mover(conexion, uid, carpeta)
         elif que == 'borrar':
             carpeta = _carpeta_especial(conexion, '\\Trash', ('trash', 'papelera', 'deleted items', 'elementos eliminados'))

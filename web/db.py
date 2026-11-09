@@ -9,6 +9,17 @@ import uuid
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / 'data' / 'tareas.sqlite3'
 
+class DatosNoValidos(ValueError):
+    """Error con un mensaje escrito para el usuario: se puede enseñar tal cual en la web o en el bot.
+
+    Cualquier otra excepción puede llevar detalles internos y no debe llegar a la web.
+    """
+
+    def __init__(self, mensaje):
+        super().__init__(mensaje)
+        self.mensaje = mensaje
+
+
 ESTADOS = ['Sin Empezar', 'En Curso', 'Terminado']
 IMPORTANCIAS = ['Alta', 'Media', 'Baja']
 CAMPOS = ('id', 'nombre', 'importancia', 'fecha_limite', 'hora_limite', 'status', 'fecha', 'persona')
@@ -224,16 +235,16 @@ def build_task_payload(data, existing=None):
     persona = (data.get('persona') or existing.get('persona') or persona_por_defecto()).strip() or persona_por_defecto()
 
     if not nombre:
-        raise ValueError('El nombre de la tarea es obligatorio')
+        raise DatosNoValidos('El nombre de la tarea es obligatorio')
 
     if not importancia:
-        raise ValueError('La importancia de la tarea es obligatoria')
+        raise DatosNoValidos('La importancia de la tarea es obligatoria')
 
     if hora_limite:
         try:
             datetime.strptime(hora_limite, '%H:%M')
         except ValueError as error:
-            raise ValueError('Hora límite no válida (usa HH:MM)') from error
+            raise DatosNoValidos('Hora límite no válida (usa HH:MM)') from error
 
     return {
         'id': data.get('id') or existing.get('id') or uuid.uuid4().hex,

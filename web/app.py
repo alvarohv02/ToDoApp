@@ -85,9 +85,10 @@ def correos_actualizar():
 def correo_api(cuenta, uid):
     try:
         return jsonify(correo.leer(cuenta, uid))
-    except ValueError as error:
-        return jsonify({'error': str(error)}), 404
+    except db.DatosNoValidos as error:
+        return jsonify({'error': error.mensaje}), 404
     except Exception as error:
+        app.logger.warning('No se pudo abrir el correo %s/%s: %s', cuenta, uid, error)
         return jsonify({'error': f'No se pudo abrir el correo: {correo._mensaje_error(error)}'}), 502
 
 
@@ -95,9 +96,10 @@ def correo_api(cuenta, uid):
 def correo_accion_api(cuenta, uid, que):
     try:
         correo.accion(cuenta, uid, que)
-    except ValueError as error:
-        return jsonify({'error': str(error)}), 400
+    except db.DatosNoValidos as error:
+        return jsonify({'error': error.mensaje}), 400
     except Exception as error:
+        app.logger.warning('No se pudo hacer «%s» con el correo %s/%s: %s', que, cuenta, uid, error)
         return jsonify({'error': f'No se pudo hacer: {correo._mensaje_error(error)}'}), 502
     return jsonify({'ok': True})
 
@@ -150,16 +152,16 @@ def leer_recordatorio(payload, destino_actual=None):
     """Valida lo que manda la web. Devuelve (texto, cuando, destino) o lanza ValueError."""
     texto = (payload.get('texto') or '').strip()
     if not texto:
-        raise ValueError('El recordatorio necesita un texto')
+        raise db.DatosNoValidos('El recordatorio necesita un texto')
     try:
         cuando = datetime.strptime((payload.get('cuando') or '')[:16], '%Y-%m-%dT%H:%M')
     except ValueError as error:
-        raise ValueError('Fecha y hora no válidas') from error
+        raise db.DatosNoValidos('Fecha y hora no válidas') from error
     if cuando <= datetime.now():
-        raise ValueError('La fecha y hora deben ser futuras')
+        raise db.DatosNoValidos('La fecha y hora deben ser futuras')
     destino = payload.get('destino') or destino_actual
     if destino != destino_actual and destino not in {c['destino'] for c in canales_recordatorio()}:
-        raise ValueError('Elige si quieres el aviso por WhatsApp o por Telegram')
+        raise db.DatosNoValidos('Elige si quieres el aviso por WhatsApp o por Telegram')
     return texto, cuando, destino
 
 
@@ -168,8 +170,8 @@ def eventos_api():
     if request.method == 'POST':
         try:
             datos = eventos.validar(request.get_json(silent=True) or {})
-        except ValueError as error:
-            return jsonify({'error': str(error)}), 400
+        except db.DatosNoValidos as error:
+            return jsonify({'error': error.mensaje}), 400
         return jsonify(db.obtener_evento(db.guardar_evento(datos))), 201
 
     # GET ?desde=AAAA-MM-DD&hasta=AAAA-MM-DD -> ocurrencias (las repeticiones ya expandidas)
@@ -203,8 +205,8 @@ def evento_api(evento_id):
             eventos.borrar(evento, alcance, dia)
             return '', 204
         nuevo_id = eventos.modificar(evento, request.get_json(silent=True) or {}, alcance, dia)
-    except ValueError as error:
-        return jsonify({'error': str(error)}), 400
+    except db.DatosNoValidos as error:
+        return jsonify({'error': error.mensaje}), 400
     return jsonify(db.obtener_evento(nuevo_id))
 
 
@@ -219,8 +221,10 @@ def google_sincronizar():
         return jsonify({'error': 'Google Calendar no está configurado'}), 400
     try:
         google_cal.sincronizar()
-    except Exception as error:  # el detalle queda en el estado y en el log
-        return jsonify({**google_cal.estado, 'configurado': True, 'error': str(error)}), 502
+    except Exception:  # el detalle queda en el estado y en el log
+        app.logger.exception('Error sincronizando con Google Calendar')
+        return jsonify({**google_cal.estado, 'configurado': True,
+                        'error': 'No se pudo sincronizar con Google (detalles en los registros del servidor)'}), 502
     return jsonify({**google_cal.estado, 'configurado': True})
 
 
@@ -229,8 +233,8 @@ def recordatorios_api():
     if request.method == 'POST':
         try:
             texto, cuando, destino = leer_recordatorio(request.get_json(silent=True) or {})
-        except ValueError as error:
-            return jsonify({'error': str(error)}), 400
+        except db.DatosNoValidos as error:
+            return jsonify({'error': error.mensaje}), 400
         nuevo = db.crear_recordatorio(destino, texto, cuando)
         return jsonify(recordatorio_a_json(db.obtener_recordatorio(nuevo))), 201
     return jsonify([recordatorio_a_json(r) for r in db.listar_recordatorios()])
@@ -253,8 +257,8 @@ def recordatorio_api(recordatorio_id):
 
     try:
         texto, cuando, destino = leer_recordatorio(request.get_json(silent=True) or {}, recordatorio['destino'])
-    except ValueError as error:
-        return jsonify({'error': str(error)}), 400
+    except db.DatosNoValidos as error:
+        return jsonify({'error': error.mensaje}), 400
 
     db.editar_recordatorio(recordatorio_id, texto, cuando, destino)
     return jsonify(recordatorio_a_json(db.obtener_recordatorio(recordatorio_id)))
@@ -269,8 +273,8 @@ def tareas_api():
 
     try:
         task = db.insert_task(payload)
-    except ValueError as error:
-        return jsonify({'error': str(error)}), 400
+    except db.DatosNoValidos as error:
+        return jsonify({'error': error.mensaje}), 400
 
     return jsonify(task), 201
 
@@ -286,8 +290,8 @@ def tarea_api(task_id):
 
     try:
         task = db.update_task(task_id, payload)
-    except ValueError as error:
-        return jsonify({'error': str(error)}), 400
+    except db.DatosNoValidos as error:
+        return jsonify({'error': error.mensaje}), 400
 
     if task is None:
         return jsonify({'error': 'Tarea no encontrada'}), 404

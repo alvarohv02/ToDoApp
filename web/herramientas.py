@@ -13,14 +13,17 @@ PALABRAS_VACIAS = {'la', 'el', 'los', 'las', 'de', 'del', 'a', 'al', 'en', 'un',
 
 def validar_fecha(valor):
     if valor:
-        datetime.strptime(valor, '%Y-%m-%d')  # lanza ValueError si el formato es incorrecto
+        try:
+            datetime.strptime(valor, '%Y-%m-%d')
+        except ValueError as error:
+            raise db.DatosNoValidos('Fecha no válida (usa AAAA-MM-DD)') from error
 
 
 def validar_campos(datos):
     if 'importancia' in datos and datos['importancia'] not in db.IMPORTANCIAS:
-        raise ValueError(f'Importancia no válida: {datos["importancia"]}. Usa una de {db.IMPORTANCIAS}')
+        raise db.DatosNoValidos(f'Importancia no válida: {datos["importancia"]}. Usa una de {db.IMPORTANCIAS}')
     if 'status' in datos and datos['status'] not in db.ESTADOS:
-        raise ValueError(f'Status no válido: {datos["status"]}. Usa uno de {db.ESTADOS}')
+        raise db.DatosNoValidos(f'Status no válido: {datos["status"]}. Usa uno de {db.ESTADOS}')
     if 'fecha_limite' in datos:
         validar_fecha(datos['fecha_limite'])
 
