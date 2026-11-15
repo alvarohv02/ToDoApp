@@ -5,6 +5,7 @@ CORREO_PERSONAL_USUARIO, CORREO_PERSONAL_CLAVE (contraseña de aplicación) y, s
 CORREO_PERSONAL_SERVIDOR. Cada CORREO_MINUTOS se miran los no leídos de la bandeja de entrada (solo
 las cabeceras, sin marcarlos como leídos); abrir, marcar como leído, archivar o borrar se hace al momento.
 """
+import base64
 from datetime import datetime
 from email import message_from_bytes
 from email.header import decode_header, make_header
@@ -25,6 +26,8 @@ log = logging.getLogger(__name__)
 
 MAX_POR_CUENTA = 50  # no leídos que se guardan de cada cuenta (los más recientes)
 MAX_TEXTO = 20000  # caracteres del cuerpo que se muestran al abrir un correo
+MAX_HTML = 1_500_000  # un correo en HTML más grande se enseña solo como texto
+MAX_INCRUSTADAS = 3_000_000  # bytes de imágenes incrustadas (cid:) que se meten en el HTML
 ACCIONES = ('leido', 'archivar', 'borrar')
 
 # imaplib no conoce MOVE (RFC 6851), aunque Gmail y casi todos los servidores lo admiten
@@ -241,11 +244,42 @@ class _SoloTexto(HTMLParser):
             self.partes.append(datos)
 
 
-def _cuerpo(mensaje):
-    """Texto del correo: la parte de texto plano o, si no hay, el HTML convertido a texto."""
+def _limpiar_texto(texto):
+    """Arregla la versión de texto plano que generan muchos programas de correo.
+
+    Quita los comentarios condicionales de Outlook (<!--[if mso]>...), los enlaces largos entre
+    <...> (se queda el texto del enlace), las líneas partidas con dos espacios y los huecos de más.
+    """
+    texto = texto.replace('\r', '')
+    texto = re.sub(r'<!--\[if [^\]]*\]>.*?<!\[endif\]-->', '', texto, flags=re.S)
+    texto = re.sub(r'<!--\[if [^\]]*\]><!-->|<!--<!\[endif\]-->|<!--.*?-->', '', texto, flags=re.S)
+    texto = re.sub(r'<(?:https?|mailto):[^>\s]+>', '', texto)
+    texto = re.sub(r' {2,}\n', ' ', texto)
+    texto = '\n'.join(linea.rstrip() for linea in texto.split('\n'))
+    texto = re.sub(r'\n{3,}', '\n\n', texto)
+    return texto.strip()
+
+
+def _html_a_texto(html):
+    lector = _SoloTexto()
+    lector.feed(html)
+    return _limpiar_texto(''.join(lector.partes))
+
+
+def _partes(mensaje):
+    """(texto plano, html, imágenes incrustadas {cid: (tipo, bytes)}) de un correo."""
     plano = html = None
+    incrustadas = {}
     for parte in mensaje.walk():
-        if parte.get_content_maintype() == 'multipart' or parte.get_filename():
+        if parte.get_content_maintype() == 'multipart':
+            continue
+        cid = (parte.get('Content-ID') or '').strip().strip('<>')
+        if parte.get_content_maintype() == 'image' and cid:
+            datos = parte.get_payload(decode=True)
+            if datos:
+                incrustadas[cid] = (parte.get_content_type(), datos)
+            continue
+        if parte.get_filename():
             continue
         try:
             contenido = parte.get_payload(decode=True).decode(parte.get_content_charset() or 'utf-8', 'replace')
@@ -255,12 +289,37 @@ def _cuerpo(mensaje):
             plano = contenido
         elif parte.get_content_type() == 'text/html' and html is None:
             html = contenido
-    if plano is None and html is not None:
-        lector = _SoloTexto()
-        lector.feed(html)
-        plano = ''.join(lector.partes)
-    texto = re.sub(r'\n[ \t]*\n(?:[ \t]*\n)+', '\n\n', (plano or '').replace('\r', ''))
-    return texto.strip()[:MAX_TEXTO]
+    return plano, html, incrustadas
+
+
+def _html_para_mostrar(html, incrustadas):
+    """El HTML del correo listo para la web, que lo pinta en un marco aislado (sin scripts ni nada más).
+
+    Se quitan <base> y <meta http-equiv> (no deben cambiar adónde van los enlaces ni recargar el marco)
+    y las imágenes incrustadas (cid:) se convierten en data: para verse sin pedir nada fuera.
+    """
+    html = re.sub(r'(?is)<base\b[^>]*>|<meta\b[^>]*http-equiv[^>]*>', '', html)
+    usado = 0
+
+    def incrustar(m):
+        nonlocal usado
+        tipo, datos = incrustadas.get(m.group(1), (None, None))
+        if not datos or usado + len(datos) > MAX_INCRUSTADAS:
+            return m.group(0)
+        usado += len(datos)
+        return f'data:{tipo};base64,{base64.b64encode(datos).decode()}'
+
+    html = re.sub(r'cid:([^"\'\s)>]+)', incrustar, html)
+    return html if len(html) <= MAX_HTML else ''
+
+
+def _cuerpo(mensaje):
+    """Texto del correo para el bot (y para la web si no hay HTML): limpio y sin enlaces largos."""
+    plano, html, _ = _partes(mensaje)
+    texto = _limpiar_texto(plano) if plano else (_html_a_texto(html) if html else '')
+    if html and (not texto or '<!--' in (plano or '')):
+        texto = _html_a_texto(html) or texto
+    return texto[:MAX_TEXTO]
 
 
 def leer(ident, uid):
@@ -274,8 +333,11 @@ def leer(ident, uid):
         if crudo is None:
             raise DatosNoValidos('Ese correo ya no está en la bandeja de entrada')
         mensaje = message_from_bytes(crudo)
+        _, html, incrustadas = _partes(mensaje)
         adjuntos = [_texto(p.get_filename()) for p in mensaje.walk() if p.get_filename()]
+        html = _html_para_mostrar(html, incrustadas) if html else ''
         return {**_resumen(str(uid), crudo, cuenta), 'para': _texto(mensaje['To']), 'texto': _cuerpo(mensaje),
+                'html': html, 'imagenes_remotas': bool(re.search(r'(?i)<img\b[^>]*\bsrc=["\']?https?:', html)),
                 'adjuntos': adjuntos}
     finally:
         _cerrar(conexion)

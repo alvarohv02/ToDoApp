@@ -1749,6 +1749,58 @@ async function renderizarCorreos() {
     pintar();
   }
 
+  const avisoImagenes = raiz.querySelector('[data-correo-imagenes]');
+  let correoAbierto = null;
+
+  // El HTML del correo va en un marco aislado: sin scripts, sin acceso a esta página y sin pedir nada
+  // a Internet salvo que se pulse «Mostrar imágenes» (las imágenes remotas delatan que lo has abierto)
+  function pintarCuerpo(correo, conImagenes) {
+    correoAbierto = correo;
+    const contenedor = raiz.querySelector('[data-correo-cuerpo]');
+    if (!correo.html) {
+      contenedor.replaceChildren(textoConEnlaces(correo.texto || '(Este correo no tiene texto)'));
+      avisoImagenes.hidden = true;
+      return;
+    }
+    const politica = `default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:${conImagenes ? ' https: http:' : ''}`;
+    const marco = document.createElement('iframe');
+    marco.className = 'correo-html';
+    marco.title = 'Contenido del correo';
+    marco.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
+    marco.setAttribute('referrerpolicy', 'no-referrer');
+    marco.srcdoc = '<!doctype html><html><head><meta charset="utf-8">'
+      + `<meta http-equiv="Content-Security-Policy" content="${politica}">`
+      + '<meta name="referrer" content="no-referrer"><base target="_blank">'
+      + '<style>body{margin:0;padding:16px;background:#fff;color:#1b1f2e;font-family:system-ui,sans-serif;'
+      + 'overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}</style></head><body>'
+      + correo.html + '</body></html>';
+    contenedor.replaceChildren(marco);
+    avisoImagenes.hidden = conImagenes || !correo.imagenes_remotas;
+  }
+
+  // Texto plano con los enlaces pulsables (creados como elementos, nunca como HTML)
+  function textoConEnlaces(texto) {
+    const bloque = crear('div', 'correo-texto');
+    let ultimo = 0;
+    for (const m of texto.matchAll(/https?:\/\/[^\s<>"')]+/g)) {
+      bloque.append(texto.slice(ultimo, m.index));
+      const enlace = crear('a', '', m[0].length > 60 ? `${m[0].slice(0, 57)}…` : m[0]);
+      enlace.href = m[0];
+      enlace.target = '_blank';
+      enlace.rel = 'noopener noreferrer';
+      bloque.append(enlace);
+      ultimo = m.index + m[0].length;
+    }
+    bloque.append(texto.slice(ultimo));
+    return bloque;
+  }
+
+  raiz.querySelector('[data-correo-mostrar-imagenes]').addEventListener('click', () => {
+    if (correoAbierto) {
+      pintarCuerpo(correoAbierto, true);
+    }
+  });
+
   async function abrir(cuenta, uid) {
     abierto = `${cuenta}/${uid}`;
     history.replaceState(null, '', `#${abierto}`);
@@ -1758,7 +1810,8 @@ async function renderizarCorreos() {
     raiz.querySelector('[data-correo-asunto]').textContent = 'Abriendo…';
     raiz.querySelector('[data-correo-de]').textContent = '';
     raiz.querySelector('[data-correo-meta]').textContent = '';
-    raiz.querySelector('[data-correo-texto]').textContent = '';
+    raiz.querySelector('[data-correo-cuerpo]').replaceChildren();
+    avisoImagenes.hidden = true;
     if (window.matchMedia('(max-width: 1080px)').matches) {
       detalle.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -1772,7 +1825,7 @@ async function renderizarCorreos() {
       const meta = [correo.cuenta_nombre, correo.fecha && `${formatearFecha(correo.fecha.slice(0, 10))} ${correo.fecha.slice(11, 16)}`,
         correo.adjuntos.length && `📎 ${correo.adjuntos.join(', ')}`].filter(Boolean).join(' · ');
       raiz.querySelector('[data-correo-meta]').textContent = meta;
-      raiz.querySelector('[data-correo-texto]').textContent = correo.texto || '(Este correo no tiene texto)';
+      pintarCuerpo(correo, false);
     } catch (error) {
       raiz.querySelector('[data-correo-asunto]').textContent = 'No se pudo abrir';
       errorDetalle.textContent = error.message;
