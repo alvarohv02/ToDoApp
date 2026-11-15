@@ -135,10 +135,10 @@
                     <td class="cell-title" v-text="tarea.nombre"></td>
                     <td><span class="pill" :class="'imp-' + (tarea.importancia || '').toLowerCase()" v-text="tarea.importancia"></span></td>
                     <td><span class="pill" :class="'status-' + tarea.status.toLowerCase().replace(/\s+/g, '-')" v-text="tarea.status"></span></td>
-                    <td class="cell-muted" v-text="tarea.fecha"></td>
+                    <td class="cell-muted" data-col="Creada" v-text="tarea.fecha"></td>
                     <td v-text="formatearFecha(tarea.fecha_limite) + (tarea.hora_limite ? ' · ' + tarea.hora_limite : '')"
-                        :class="{ 'cell-muted': !tarea.fecha_limite }"></td>
-                    <td :class="{ 'cell-muted': esPersonaDefecto(tarea.persona) }" v-text="tarea.persona"></td>
+                        data-col="Límite" :class="{ 'cell-muted': !tarea.fecha_limite }"></td>
+                    <td :class="{ 'cell-muted': esPersonaDefecto(tarea.persona) }" data-col="Persona" v-text="tarea.persona"></td>
                     <td class="acciones">
                         <div class="menu-wrapper">
                             <button type="button" class="icon-btn menu-btn" title="Acciones" @click="toggleMenu(tarea.id)">⋮</button>

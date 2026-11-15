@@ -664,7 +664,7 @@ a.stat:hover {
 
 .field-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.8rem;
 }
 
@@ -2197,7 +2197,189 @@ tbody tr:last-child td {
     }
 
     .reminder-form {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    /* Nada puede empujar la página hacia los lados */
+    html,
+    body {
+        overflow-x: hidden;
+    }
+
+    .main {
+        overflow-x: clip;
+    }
+
+    .column {
+        min-height: 0;
+    }
+
+    /* iOS: con letra menor de 16px hace zoom al tocar un campo, y los campos de fecha y hora
+       ignoran el ancho (y se salen de la pantalla) si no se les quita el aspecto nativo */
+    .input,
+    .reminder-card input,
+    select,
+    textarea {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        font-size: 16px;
+    }
+
+    input[type="date"],
+    input[type="time"],
+    input[type="search"] {
+        -webkit-appearance: none;
+        appearance: none;
+        min-height: 2.75rem;
+    }
+
+    .filtro-campo .input {
+        width: auto;
+        max-width: 100%;
+    }
+
+    /* La ventana de edición sale desde abajo, como en las apps */
+    .modal-overlay {
+        place-items: end center;
+        padding: 0;
+    }
+
+    .modal {
+        width: 100%;
+        max-height: min(92vh, 92dvh);
+        padding-bottom: calc(1.4rem + env(safe-area-inset-bottom));
+        border-radius: 20px 20px 0 0;
+        border-bottom: none;
+    }
+
+    .modal-actions .btn {
+        flex: 1;
+    }
+}
+
+/* Pantallas táctiles: todo lo que se pulsa tiene un tamaño cómodo para el dedo */
+@media (hover: none) {
+    .btn {
+        min-height: 2.75rem;
+    }
+
+    .icon-btn {
+        width: 2.4rem;
+        height: 2.4rem;
+    }
+
+    .view-btn {
+        min-height: 2.4rem;
+    }
+
+    .task-actions {
+        gap: 0.3rem;
+    }
+
+    .mobile-link {
+        padding: 0.45rem 0.2rem;
+    }
+}
+
+/* Tabla de tareas en el móvil: cada fila es una tarjeta, no hace falta desplazarse de lado */
+@media (max-width: 700px) {
+    .table-shell {
+        overflow: visible;
+    }
+
+    table,
+    tbody {
+        display: block;
+    }
+
+    thead {
+        display: block;
+    }
+
+    thead tr {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        padding: 0.75rem 0.9rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    th {
+        position: static;
+        display: block;
+        padding: 0.3rem 0.65rem;
+        border: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        border-radius: 999px;
+        letter-spacing: 0.04em;
+    }
+
+    th.col-acciones {
+        display: none;
+    }
+
+    tbody tr {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.35rem 0.6rem;
+        padding: 0.75rem 0.9rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    tbody tr:hover td {
+        background: transparent;
+    }
+
+    td {
+        display: block;
+        min-width: 0;
+        max-width: 100%;
+        padding: 0;
+        border: none;
+        white-space: normal;
+        font-size: 0.85rem;
+    }
+
+    td:empty {
+        display: none;
+    }
+
+    .cell-title {
+        flex: 1 1 calc(100% - 3rem);
+        min-width: 0;
+        order: -2;
+        font-size: 0.98rem;
+    }
+
+    .acciones {
+        flex: 0 0 auto;
+        order: -1;
+    }
+
+    td[data-col]::before {
+        content: attr(data-col) ": ";
+        color: var(--text-faint);
+        font-size: 0.75rem;
+        font-weight: 650;
+    }
+
+    td.empty-state {
+        width: 100%;
+    }
+}
+
+/* Abierta como app instalada (pantalla completa): respetar el notch y quitar los gestos de navegador */
+@media (display-mode: standalone) {
+    html {
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        overscroll-behavior-y: none;
+    }
+
+    .page {
+        padding-top: calc(1.25rem + env(safe-area-inset-top));
     }
 }
 
@@ -2220,8 +2402,12 @@ tbody tr:last-child td {
 
     .task-form,
     .event-form,
+    .reminder-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
     .field-row {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     /* En el móvil el mes se lee como lista: un día por fila, solo los que tienen algo */
@@ -2282,5 +2468,160 @@ tbody tr:last-child td {
 
     .panel-resumen-pista {
         flex-basis: auto;
+    }
+}
+
+/* ==========================================================================
+   Móvil: nada puede ser más ancho que la pantalla
+   --------------------------------------------------------------------------
+   En el iPhone la letra del sistema es más ancha que en Windows, y los datos reales
+   traen textos largos sin espacios (direcciones de correo, enlaces). Cualquier
+   elemento que no pueda encogerse ensancha la página y obliga a deslizar de lado.
+   ========================================================================== */
+@media (max-width: 860px) {
+    /* Las palabras largas se parten en vez de empujar su caja */
+    body {
+        overflow-wrap: anywhere;
+    }
+
+    /* Los textos que no pueden partirse en varias líneas se recortan con "…" */
+    .btn,
+    .card-link,
+    .pill,
+    .agenda-status,
+    .reminder-chip,
+    .correo-cuenta,
+    .reminder-save,
+    .reminder-cancel,
+    .view-btn {
+        max-width: 100%;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .btn {
+        white-space: normal;
+        text-align: center;
+    }
+
+    /* Barra inferior: cinco huecos iguales que pueden encogerse */
+    .mobile-nav {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        padding-left: max(0.25rem, env(safe-area-inset-left));
+        padding-right: max(0.25rem, env(safe-area-inset-right));
+    }
+
+    .mobile-link {
+        min-width: 0;
+        padding-left: 0.1rem;
+        padding-right: 0.1rem;
+        font-size: 0.62rem;
+        letter-spacing: -0.01em;
+    }
+
+    .mobile-link span {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* Cabeceras de tarjeta: el título se encoge y el enlace no se sale */
+    .card-header {
+        flex-wrap: wrap;
+        gap: 0.4rem 1rem;
+    }
+
+    .card-header > * {
+        min-width: 0;
+    }
+
+    .panel-saludo {
+        flex-wrap: wrap;
+    }
+
+    /* Rejillas y filas flexibles: los hijos pueden ser más estrechos que su contenido */
+    .page > *,
+    .card,
+    .column,
+    .task,
+    .task-main,
+    .correo-item > *,
+    .conexion,
+    .hoy-item > *,
+    .field,
+    .reminder-card > * {
+        min-width: 0;
+    }
+
+    .conexiones {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .correo-lado {
+        max-width: 6.5rem;
+    }
+
+    /* Selectores y campos nunca más anchos que su hueco (el select toma el ancho de la opción más larga) */
+    select,
+    input,
+    textarea {
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .filtro-campo {
+        flex-wrap: wrap;
+        max-width: 100%;
+    }
+
+    .filtros-fila > * {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .segmented {
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .page-actions > * {
+        min-width: 0;
+    }
+
+    .event-form-actions,
+    .reminder-actions,
+    .modal-actions,
+    .correo-acciones {
+        flex-wrap: wrap;
+    }
+
+    .reminder-actions > *,
+    .event-form-actions > * {
+        flex: 1 1 auto;
+    }
+
+    .chip-time,
+    .vence {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    th,
+    .th-orden {
+        max-width: 100%;
+        min-width: 0;
+        white-space: normal;
+    }
+
+    /* El contenido de un correo HTML tiene su propio desplazamiento dentro del marco */
+    .correo-html,
+    .correo-texto {
+        max-width: 100%;
     }
 }
