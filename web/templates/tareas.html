@@ -11,7 +11,10 @@
         <div>
             <p class="eyebrow">Espacio de trabajo</p>
             <h1>Tareas</h1>
-            <p class="page-subtitle">Arrastra las tarjetas entre columnas para cambiar su estado.</p>
+            <p class="page-subtitle">
+                <span class="solo-raton">Arrastra las tarjetas entre columnas para cambiar su estado.</span>
+                <span class="solo-tactil">Pulsa una tarea para modificarla y ➜ para pasarla a la siguiente columna.</span>
+            </p>
         </div>
         <div class="page-actions">
             <div class="segmented" role="group" aria-label="Vista">
@@ -90,7 +93,9 @@
             </header>
             <article class="task" v-for="(tarea, i) in tareas.filter(t => t.status === estado)"
                      :key="tarea.id || tarea.nombre || i"
-                     draggable="true" @dragstart="dragStart(tarea)" @dragend="dragEnd">
+                     draggable="true" @dragstart="dragStart(tarea)" @dragend="dragEnd"
+                     tabindex="0" title="Pulsa para modificar · arrastra para cambiar de estado"
+                     @click="abrirModal(tarea, tarea.id)" @keydown.enter.self="abrirModal(tarea, tarea.id)">
                 <div class="task-main">
                     <span class="task-title" v-text="tarea.nombre"></span>
                     <div class="task-tags">
@@ -100,7 +105,12 @@
                         <span v-if="!esPersonaDefecto(tarea.persona)" class="task-meta" v-text="'👤 ' + tarea.persona"></span>
                     </div>
                 </div>
-                <button type="button" class="icon-btn delete" title="Borrar tarea" @click="eliminarTarea(i, estado)">✕</button>
+                <div class="task-actions">
+                    <button type="button" class="icon-btn move" :title="estado === 'Terminado' ? 'Volver a Sin empezar' : 'Pasar a la siguiente columna'"
+                            @click.stop="avanzar(tarea)" v-text="estado === 'Terminado' ? '↺' : '➜'"></button>
+                    <button type="button" class="icon-btn edit" title="Modificar tarea" @click.stop="abrirModal(tarea, tarea.id)">✏️</button>
+                    <button type="button" class="icon-btn delete" title="Borrar tarea" @click.stop="eliminarTarea(i, estado)">✕</button>
+                </div>
             </article>
             <p v-if="!tareas.some(t => t.status === estado)" class="column-empty">Suelta aquí una tarea</p>
         </section>

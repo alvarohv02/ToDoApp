@@ -1334,14 +1334,51 @@ a.stat:hover {
     color: var(--text-muted);
 }
 
+.task:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.task-actions {
+    display: flex;
+    flex: none;
+    gap: 0.15rem;
+}
+
+.task .edit,
 .task .delete {
     opacity: 0;
     transition: opacity 0.15s;
 }
 
+.task:hover .edit,
 .task:hover .delete,
+.task:focus-within .edit,
 .task:focus-within .delete {
     opacity: 1;
+}
+
+.task .move {
+    color: var(--accent);
+    font-size: 1rem;
+}
+
+/* En pantallas táctiles no hay "pasar el ratón": los botones se ven siempre y los textos hablan de pulsar */
+@media (hover: none) {
+    .task .edit,
+    .task .delete {
+        opacity: 1;
+    }
+
+    .solo-raton {
+        display: none;
+    }
+}
+
+@media (hover: hover) {
+    .solo-tactil {
+        display: none;
+    }
 }
 
 /* Tabla */

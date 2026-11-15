@@ -1022,6 +1022,14 @@ function renderizarVistaTareas() {
         document.querySelectorAll('.column').forEach((column) => column.classList.remove('highlight'));
       },
 
+      // En pantallas táctiles no se puede arrastrar: el botón ➜ pasa la tarea a la siguiente columna
+      async avanzar(tarea) {
+        const orden = ['Sin Empezar', 'En Curso', 'Terminado'];
+        const siguiente = orden[(orden.indexOf(tarea.status) + 1) % orden.length];
+        this.tareaArrastrando = tarea;
+        await this.drop(siguiente);
+      },
+
       async agregarTarea() {
         if (!this.nuevaTarea.nombre || !this.nuevaTarea.importancia) {
           return;
