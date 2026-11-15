@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 # El .env vive en la raíz del proyecto (un nivel por encima de /web)
 load_dotenv(Path(__file__).resolve().parent.parent / '.env')
@@ -45,6 +45,21 @@ def doing():
 @app.route('/calendar')
 def calendario():
     return render_template('./calendar.html')
+
+
+# --- App instalable (PWA): el manifiesto y el service worker tienen que servirse desde la raíz
+# para que abarquen toda la web, y con su tipo MIME correcto
+
+@app.route('/manifest.webmanifest')
+def manifiesto():
+    return send_from_directory(app.static_folder, 'manifest.webmanifest', mimetype='application/manifest+json')
+
+
+@app.route('/sw.js')
+def service_worker():
+    respuesta = send_from_directory(app.static_folder, 'js/sw.js', mimetype='application/javascript')
+    respuesta.headers['Cache-Control'] = 'no-cache'
+    return respuesta
 
 
 @app.route('/legal/')

@@ -1386,7 +1386,17 @@ async function renderizarRecordatorios() {
 
 // --- Tema claro / oscuro ---------------------------------------------------------
 
+// Color de la barra de estado del móvil (app instalada): el de fondo del tema en uso
+function sincronizarColorBarra() {
+  const tema = document.documentElement.dataset.theme
+    || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const color = tema === 'dark' ? '#0e1016' : '#f5f6fa';
+  document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => meta.setAttribute('content', color));
+}
+
 function iniciarTema() {
+  sincronizarColorBarra();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', sincronizarColorBarra);
   const boton = document.querySelector('[data-theme-toggle]');
   if (!boton) {
     return;
@@ -1397,6 +1407,7 @@ function iniciarTema() {
       || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     const nuevo = actual === 'dark' ? 'light' : 'dark';
     raiz.dataset.theme = nuevo;
+    sincronizarColorBarra();
     try {
       window.localStorage.setItem('tema', nuevo);
     } catch (error) {
@@ -1880,7 +1891,33 @@ async function renderizarCorreos() {
   }
 }
 
+// --- App instalable -----------------------------------------------------------------
+
+function iniciarAppInstalable() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+
+  // En el iPhone la app se queda abierta en segundo plano durante días. Al volver a ella tras un
+  // rato, se recarga la página para no enseñar datos viejos (salvo que se esté escribiendo algo).
+  const instalada = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (!instalada) return;
+  let ocultaDesde = null;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      ocultaDesde = Date.now();
+      return;
+    }
+    const enFormulario = document.querySelector('.modal, input:focus, textarea:focus, select:focus');
+    if (ocultaDesde && Date.now() - ocultaDesde > 5 * 60 * 1000 && !enFormulario) {
+      window.location.reload();
+    }
+    ocultaDesde = null;
+  });
+}
+
 function iniciarAplicacion() {
+  iniciarAppInstalable();
   iniciarTema();
   renderizarInicio();
   renderizarVistaTareas();

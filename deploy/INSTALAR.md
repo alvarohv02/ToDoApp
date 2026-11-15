@@ -211,6 +211,33 @@ El navegador mostrará "No seguro" porque la URL es http://, pero el tráfico va
 del túnel de Tailscale. El certificado de Let's Encrypt no se puede sacar como el del webhook,
 porque Let's Encrypt no llega a una IP de Tailscale.
 
+## Instalar la web como app en el móvil [admin]
+
+La web es una *app instalable* (PWA): desde Safari o Chrome se añade a la pantalla de inicio y se
+abre a pantalla completa, con su icono, como cualquier otra app. No pasa por la App Store ni hay
+que pagar nada. Hace falta HTTPS, y como Let's Encrypt no llega a una IP de Tailscale, se usa el
+certificado que Tailscale emite para el nombre de la máquina (`tailscale status` lo muestra,
+tiene la forma `NOMBRE_TAILSCALE.ts.net`). Si ya tienes Nextcloud con ese certificado, el primer
+comando solo lo renueva.
+
+```bash
+sudo mkdir -p /etc/nginx/ts-certs
+sudo tailscale cert --cert-file /etc/nginx/ts-certs/nextcloud.crt --key-file /etc/nginx/ts-certs/nextcloud.key NOMBRE_TAILSCALE.ts.net
+sudo cp /opt/notion/deploy/nginx-notion-app.conf /etc/nginx/sites-available/notion-app
+sudo sed -i 's/NOMBRE_TAILSCALE/mi-servidor.tailXXXX/' /etc/nginx/sites-available/notion-app   # tu nombre, sin ".ts.net"
+sudo ln -s /etc/nginx/sites-available/notion-app /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Comprueba que abre `https://NOMBRE_TAILSCALE.ts.net:8443` con Tailscale conectado (candado y sin avisos).
+
+En el iPhone (iOS 16.4 o posterior): abre esa dirección en **Safari** (tiene que ser Safari, no
+Chrome) → botón Compartir → **Añadir a pantalla de inicio** → Añadir. En Android, en Chrome:
+menú ⋮ → **Instalar aplicación**.
+
+La app necesita Tailscale conectado en el móvil (en el iPhone, Tailscale se queda activo como
+VPN). Si no hay conexión, muestra un aviso y las últimas páginas que cargó.
+
 ## Limitar SSH a Tailscale y a la red de casa [admin]
 
 Hazlo conectado por Tailscale o desde casa, y **no cierres la sesión actual** hasta comprobar
