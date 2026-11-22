@@ -7,13 +7,9 @@
 //
 // Estrategia "red primero, caché de respaldo": se intenta la red y, si falla, se sirve lo guardado.
 // Así una actualización del código llega en la siguiente carga sin tener que tocar nada aquí.
-const CACHE = 'mi-notion-v1';
+const CACHE = 'mi-notion-v2';
+// Las páginas no se precargan: dependen de la sesión. Se guardan al visitarlas.
 const PRECARGA = [
-    '/',
-    '/tareas',
-    '/calendar',
-    '/recordatorios',
-    '/correos',
     '/static/css/app.css',
     '/static/js/app.js',
     '/static/img/Logo_Notas.png',
@@ -45,13 +41,15 @@ self.addEventListener('fetch', (evento) => {
     const url = new URL(peticion.url);
     const esApi = url.origin === self.location.origin && url.pathname.startsWith('/api/');
     const esVue = url.hostname === 'unpkg.com';
-    if (esApi) return;
+    const esSesion = ['/login', '/logout', '/cuenta'].includes(url.pathname);
+    if (esApi || esSesion) return;
     if (url.origin !== self.location.origin && !esVue) return;
 
     evento.respondWith(
         fetch(peticion)
             .then((respuesta) => {
-                if (respuesta.ok || respuesta.type === 'opaque') {
+                // Una redirección es la página de login (sesión caducada): no se guarda como si fuera la pedida
+                if ((respuesta.ok && !respuesta.redirected) || respuesta.type === 'opaque') {
                     const copia = respuesta.clone();
                     caches.open(CACHE).then((cache) => cache.put(peticion, copia)).catch(() => {});
                 }

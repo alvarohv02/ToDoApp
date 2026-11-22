@@ -486,6 +486,15 @@ def sincronizar():
     """Una vuelta completa: primero se traen los cambios de Google y luego se suben los de la app."""
     if not configurado():
         raise GoogleError(0, 'Google Calendar no está configurado')
+    # La cuenta de Google es del administrador: solo se sincronizan sus eventos, aunque lo pida otro
+    marca = db.usar_usuario(None)
+    try:
+        return _sincronizar()
+    finally:
+        db.soltar_usuario(marca)
+
+
+def _sincronizar():
     with _cerrojo:
         estado['omitidos'] = 0
         try:

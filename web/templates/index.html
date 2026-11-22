@@ -10,6 +10,7 @@
         </div>
         <div class="page-actions">
             <a class="btn btn-primary" href="#resumen-del-dia" data-ir-resumen>✨ Resumen del día</a>
+            {% if usuario %}<a class="btn btn-ghost solo-movil" href="/cuenta{{ '#usuarios' if solicitudes }}" title="Tu cuenta y cerrar sesión">👤 {{ usuario.nombre }}{% if solicitudes %} <span class="insignia" title="Solicitudes de registro">{{ solicitudes }}</span>{% endif %}</a>{% endif %}
         </div>
     </header>
 
@@ -30,7 +31,7 @@
             <ul class="checklist" data-inicio-prioridades><li class="empty-state">Cargando…</li></ul>
         </section>
 
-        <section class="card panel-card">
+        <section class="card panel-card"{% if usuario and not usuario.es_admin %} hidden{% endif %}>
             <div class="card-header">
                 <h2 class="card-title"><span class="panel-icono">📧</span> Correos no leídos</h2>
                 <a class="card-link" href="/correos" data-inicio-correos-enlace>Ver todos →</a>
@@ -46,7 +47,7 @@
             <ul class="checklist" data-inicio-pendientes><li class="empty-state">Cargando…</li></ul>
         </section>
 
-        <section class="card panel-card panel-ancho">
+        <section class="card panel-card panel-ancho"{% if usuario and not usuario.es_admin %} hidden{% endif %}>
             <div class="card-header">
                 <h2 class="card-title"><span class="panel-icono">🔗</span> Herramientas conectadas</h2>
             </div>

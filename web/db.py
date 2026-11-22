@@ -53,6 +53,9 @@ def init_db():
         columnas = {fila['name'] for fila in connection.execute('PRAGMA table_info(tareas)')}
         if 'hora_limite' not in columnas:
             connection.execute("ALTER TABLE tareas ADD COLUMN hora_limite TEXT NOT NULL DEFAULT ''")
+        # Cada tarea es de un usuario. Las de antes de haber usuarios (sin dueño) son del administrador
+        if 'usuario_id' not in columnas:
+            connection.execute('ALTER TABLE tareas ADD COLUMN usuario_id INTEGER')
         connection.execute('CREATE INDEX IF NOT EXISTS idx_tareas_fecha_limite ON tareas (fecha_limite)')
         connection.execute('CREATE INDEX IF NOT EXISTS idx_tareas_status ON tareas (status)')
 
@@ -111,6 +114,34 @@ def init_db():
             )
             '''
         )
+        # Cada evento es de un usuario. Los de antes de haber usuarios (sin dueño) son del administrador
+        columnas = {fila['name'] for fila in connection.execute('PRAGMA table_info(eventos)')}
+        if 'usuario_id' not in columnas:
+            connection.execute('ALTER TABLE eventos ADD COLUMN usuario_id INTEGER')
+
+        # Usuarios de la web. La contraseña se guarda solo como hash (scrypt con sal, de Werkzeug).
+        # chats: sus chats del bot ("34600111222,tg:123456789"), para saber de quién es cada mensaje.
+        # version_sesion: al cambiarla se cierran todas sus sesiones abiertas
+        connection.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                nombre TEXT NOT NULL,
+                clave_hash TEXT NOT NULL,
+                es_admin INTEGER NOT NULL DEFAULT 0,
+                chats TEXT NOT NULL DEFAULT '',
+                version_sesion INTEGER NOT NULL DEFAULT 1,
+                estado TEXT NOT NULL DEFAULT 'activo',
+                creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            '''
+        )
+        # estado: 'activo' o 'pendiente' (registrado desde la web, a falta de que lo apruebe el administrador)
+        columnas = {fila['name'] for fila in connection.execute('PRAGMA table_info(usuarios)')}
+        if 'estado' not in columnas:
+            connection.execute("ALTER TABLE usuarios ADD COLUMN estado TEXT NOT NULL DEFAULT 'activo'")
+
         # Días concretos que se han quitado (o cambiado) de un evento que se repite
         connection.execute(
             '''
@@ -179,11 +210,13 @@ def row_to_task(row):
 
 
 def fetch_all_tasks():
+    condicion, parametros = _filtro_dueno()
     with get_db_connection() as connection:
         rows = connection.execute(
-            '''
+            f'''
             SELECT id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona
             FROM tareas
+            WHERE {condicion}
             ORDER BY
                 CASE WHEN fecha_limite IS NULL OR fecha_limite = '' THEN 1 ELSE 0 END,
                 fecha_limite,
@@ -191,28 +224,36 @@ def fetch_all_tasks():
                 hora_limite,
                 fecha DESC,
                 nombre COLLATE NOCASE
-            '''
+            ''',
+            parametros,
         ).fetchall()
 
     return [row_to_task(row) for row in rows]
 
 
 def fetch_task(task_id):
+    condicion, parametros = _filtro_dueno()
     with get_db_connection() as connection:
         row = connection.execute(
-            '''
+            f'''
             SELECT id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona
             FROM tareas
-            WHERE id = ?
+            WHERE id = ? AND {condicion}
             ''',
-            (task_id,),
+            (task_id, *parametros),
         ).fetchone()
 
     return row_to_task(row) if row else None
 
 
 def persona_por_defecto():
-    """A quién se asigna una tarea si no se indica nadie (PERSONA_POR_DEFECTO en el .env)."""
+    """A quién se asigna una tarea si no se indica nadie.
+
+    Para el administrador, PERSONA_POR_DEFECTO del .env; para los demás usuarios, su propio nombre.
+    """
+    usuario = _usuario.get()
+    if usuario and usuario['id'] != id_admin_principal():
+        return usuario['nombre']
     return os.getenv('PERSONA_POR_DEFECTO', '').strip() or 'Sin asignar'
 
 
@@ -264,10 +305,10 @@ def insert_task(data):
     with get_db_connection() as connection:
         connection.execute(
             '''
-            INSERT INTO tareas (id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tareas (id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona, usuario_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
-            tuple(task[campo] for campo in CAMPOS),
+            (*(task[campo] for campo in CAMPOS), id_dueno()),
         )
         connection.commit()
 
@@ -283,13 +324,14 @@ def update_task(task_id, data):
 
     task = build_task_payload(data, existing)
     _anotar_estado('tareas', task_id)
+    condicion, parametros = _filtro_dueno()
 
     with get_db_connection() as connection:
         connection.execute(
-            '''
+            f'''
             UPDATE tareas
             SET nombre = ?, importancia = ?, fecha_limite = ?, hora_limite = ?, status = ?, fecha = ?, persona = ?
-            WHERE id = ?
+            WHERE id = ? AND {condicion}
             ''',
             (
                 task['nombre'],
@@ -300,6 +342,7 @@ def update_task(task_id, data):
                 task['fecha'],
                 task['persona'],
                 task['id'],
+                *parametros,
             ),
         )
         connection.commit()
@@ -309,9 +352,12 @@ def update_task(task_id, data):
 
 def delete_task(task_id):
     """Devuelve True si se ha borrado algo."""
+    if fetch_task(task_id) is None:
+        return False  # no existe o es de otro usuario
     _anotar_estado('tareas', task_id)
+    condicion, parametros = _filtro_dueno()
     with get_db_connection() as connection:
-        cursor = connection.execute('DELETE FROM tareas WHERE id = ?', (task_id,))
+        cursor = connection.execute(f'DELETE FROM tareas WHERE id = ? AND {condicion}', (task_id, *parametros))
         connection.commit()
 
     return cursor.rowcount > 0
@@ -444,19 +490,30 @@ def ultimo_mensaje_usuario(telefono):
     return row['ultimo'] if row else None
 
 
-def listar_recordatorios(dias_historial=30):
-    """Pendientes primero (por fecha) y después los enviados o fallidos de los últimos días."""
+def listar_recordatorios(destinos=None, dias_historial=30):
+    """Pendientes primero (por fecha) y después los enviados o fallidos de los últimos días.
+
+    Con destinos, solo los de esos chats (los de un usuario).
+    """
+    filtro, parametros = '', []
+    if destinos is not None:
+        destinos = list(destinos)
+        if not destinos:
+            return []
+        filtro = f'AND destino IN ({", ".join("?" * len(destinos))})'
+        parametros = destinos
     with get_db_connection() as connection:
         rows = connection.execute(
-            '''
+            f'''
             SELECT id, destino, texto, cuando, estado FROM recordatorios
-            WHERE estado = 'pendiente'
-               OR (estado IN ('enviado', 'error') AND cuando >= strftime('%Y-%m-%d %H:%M', 'now', 'localtime', ?))
+            WHERE (estado = 'pendiente'
+               OR (estado IN ('enviado', 'error') AND cuando >= strftime('%Y-%m-%d %H:%M', 'now', 'localtime', ?)))
+               {filtro}
             ORDER BY CASE estado WHEN 'pendiente' THEN 0 ELSE 1 END,
                      CASE estado WHEN 'pendiente' THEN cuando END ASC,
                      cuando DESC
             ''',
-            (f'-{dias_historial} days',),
+            (f'-{dias_historial} days', *parametros),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -487,18 +544,36 @@ def editar_recordatorio(recordatorio_id, texto, cuando, destino=None):
 CAMPOS_EVENTO = ('titulo', 'categoria', 'fecha', 'hora_inicio', 'hora_fin', 'repeticion', 'hasta')
 
 
+def _filtro_dueno():
+    """(condición SQL, parámetros) para quedarse con las tareas o eventos del usuario actual.
+
+    Sin usuarios creados todavía no se filtra nada (como antes de existir el inicio de sesión).
+    Lo que no tiene dueño es del administrador principal.
+    """
+    dueno = id_dueno()
+    if dueno is None:
+        return '1', ()
+    if dueno == id_admin_principal():
+        return '(usuario_id = ? OR usuario_id IS NULL)', (dueno,)
+    return 'usuario_id = ?', (dueno,)
+
+
 def listar_eventos():
+    condicion, parametros = _filtro_dueno()
     with get_db_connection() as connection:
         rows = connection.execute(
-            f'SELECT id, {", ".join(CAMPOS_EVENTO)} FROM eventos ORDER BY fecha, hora_inicio'
+            f'SELECT id, {", ".join(CAMPOS_EVENTO)} FROM eventos WHERE {condicion} ORDER BY fecha, hora_inicio',
+            parametros,
         ).fetchall()
     return [dict(row) for row in rows]
 
 
 def obtener_evento(evento_id):
+    condicion, parametros = _filtro_dueno()
     with get_db_connection() as connection:
         row = connection.execute(
-            f'SELECT id, {", ".join(CAMPOS_EVENTO)} FROM eventos WHERE id = ?', (evento_id,)
+            f'SELECT id, {", ".join(CAMPOS_EVENTO)} FROM eventos WHERE id = ? AND {condicion}',
+            (evento_id, *parametros),
         ).fetchone()
     return dict(row) if row else None
 
@@ -508,27 +583,32 @@ def guardar_evento(datos, evento_id=None):
     valores = tuple(datos[campo] for campo in CAMPOS_EVENTO)
     if evento_id is not None:
         _anotar_estado('eventos', evento_id)
+    condicion, parametros = _filtro_dueno()
     with get_db_connection() as connection:
         if evento_id is None:
             cursor = connection.execute(
-                f'INSERT INTO eventos ({", ".join(CAMPOS_EVENTO)}) VALUES ({", ".join("?" * len(CAMPOS_EVENTO))})',
-                valores,
+                f'INSERT INTO eventos ({", ".join(CAMPOS_EVENTO)}, usuario_id) '
+                f'VALUES ({", ".join("?" * len(CAMPOS_EVENTO))}, ?)',
+                (*valores, id_dueno()),
             )
             evento_id = cursor.lastrowid
             _anotar({'accion': 'borrar', 'tabla': 'eventos', 'id': evento_id})
         else:
             connection.execute(
-                f'UPDATE eventos SET {", ".join(f"{c} = ?" for c in CAMPOS_EVENTO)} WHERE id = ?',
-                (*valores, evento_id),
+                f'UPDATE eventos SET {", ".join(f"{c} = ?" for c in CAMPOS_EVENTO)} WHERE id = ? AND {condicion}',
+                (*valores, evento_id, *parametros),
             )
         connection.commit()
     return evento_id
 
 
 def borrar_evento(evento_id):
+    if obtener_evento(evento_id) is None:
+        return False  # no existe o es de otro usuario
     _anotar_estado('eventos', evento_id)
+    condicion, parametros = _filtro_dueno()
     with get_db_connection() as connection:
-        cursor = connection.execute('DELETE FROM eventos WHERE id = ?', (evento_id,))
+        cursor = connection.execute(f'DELETE FROM eventos WHERE id = ? AND {condicion}', (evento_id, *parametros))
         connection.commit()
     return cursor.rowcount > 0
 
@@ -712,3 +792,145 @@ def deshacer_ultimo(telefono, horas=24):
         connection.execute('DELETE FROM deshacer WHERE id = ?', (fila['id'],))
         connection.commit()
     return fila['resumen']
+
+
+# --- Usuarios -----------------------------------------------------------------------
+# El usuario "actual" (el que ha iniciado sesión en la web, o el dueño del chat que escribe al bot)
+# se guarda en una variable de contexto, igual que el diario de deshacer: así las funciones de
+# eventos no necesitan recibirlo y cada hilo o petición tiene el suyo.
+
+CAMPOS_USUARIO = 'id, usuario, nombre, es_admin, chats, version_sesion, estado, creado_en'
+_usuario = contextvars.ContextVar('usuario', default=None)
+
+
+def usar_usuario(usuario):
+    """Fija el usuario actual. Devuelve una marca para volver al anterior con soltar_usuario()."""
+    return _usuario.set(usuario)
+
+
+def soltar_usuario(marca):
+    _usuario.reset(marca)
+
+
+def usuario_actual():
+    return _usuario.get()
+
+
+def _usuario_a_dict(fila):
+    if fila is None:
+        return None
+    usuario = dict(fila)
+    usuario['es_admin'] = bool(usuario['es_admin'])
+    usuario['chats'] = [c.strip() for c in usuario['chats'].split(',') if c.strip()]
+    return usuario
+
+
+def listar_usuarios():
+    with get_db_connection() as connection:
+        rows = connection.execute(f'SELECT {CAMPOS_USUARIO} FROM usuarios ORDER BY id').fetchall()
+    return [_usuario_a_dict(r) for r in rows]
+
+
+def hay_usuarios():
+    with get_db_connection() as connection:
+        return connection.execute('SELECT COUNT(*) FROM usuarios').fetchone()[0] > 0
+
+
+def obtener_usuario(usuario_id):
+    with get_db_connection() as connection:
+        fila = connection.execute(f'SELECT {CAMPOS_USUARIO} FROM usuarios WHERE id = ?', (usuario_id,)).fetchone()
+    return _usuario_a_dict(fila)
+
+
+def usuario_por_nombre(usuario):
+    """El usuario con su hash (solo para comprobar la contraseña al iniciar sesión)."""
+    with get_db_connection() as connection:
+        fila = connection.execute(f'SELECT {CAMPOS_USUARIO}, clave_hash FROM usuarios WHERE usuario = ?',
+                                  ((usuario or '').strip(),)).fetchone()
+    if fila is None:
+        return None
+    datos = _usuario_a_dict({k: fila[k] for k in fila.keys() if k != 'clave_hash'})
+    datos['clave_hash'] = fila['clave_hash']
+    return datos
+
+
+def crear_usuario(usuario, nombre, clave_hash, es_admin=False, chats=(), estado='activo'):
+    with get_db_connection() as connection:
+        cursor = connection.execute(
+            'INSERT INTO usuarios (usuario, nombre, clave_hash, es_admin, chats, estado) VALUES (?, ?, ?, ?, ?, ?)',
+            (usuario.strip(), nombre.strip(), clave_hash, int(es_admin), ','.join(chats), estado))
+        connection.commit()
+    return cursor.lastrowid
+
+
+def cambiar_clave(usuario_id, clave_hash):
+    """Cambia la contraseña y cierra todas las sesiones abiertas de ese usuario."""
+    with get_db_connection() as connection:
+        connection.execute('UPDATE usuarios SET clave_hash = ?, version_sesion = version_sesion + 1 WHERE id = ?',
+                           (clave_hash, usuario_id))
+        connection.commit()
+
+
+def cerrar_sesiones(usuario_id):
+    with get_db_connection() as connection:
+        connection.execute('UPDATE usuarios SET version_sesion = version_sesion + 1 WHERE id = ?', (usuario_id,))
+        connection.commit()
+
+
+def fijar_chats(usuario_id, chats):
+    with get_db_connection() as connection:
+        connection.execute('UPDATE usuarios SET chats = ? WHERE id = ?', (','.join(chats), usuario_id))
+        connection.commit()
+
+
+def aprobar_usuario(usuario_id):
+    with get_db_connection() as connection:
+        connection.execute("UPDATE usuarios SET estado = 'activo' WHERE id = ?", (usuario_id,))
+        connection.commit()
+
+
+def contar_pendientes():
+    with get_db_connection() as connection:
+        return connection.execute("SELECT COUNT(*) FROM usuarios WHERE estado = 'pendiente'").fetchone()[0]
+
+
+def borrar_usuario(usuario_id):
+    """Borra el usuario junto con sus tareas, sus eventos y los recordatorios de sus chats."""
+    usuario = obtener_usuario(usuario_id)
+    if usuario is None:
+        return
+    with get_db_connection() as connection:
+        eventos = [(f[0],) for f in connection.execute('SELECT id FROM eventos WHERE usuario_id = ?', (usuario_id,))]
+        connection.executemany('DELETE FROM evento_excepciones WHERE evento_id = ?', eventos)
+        connection.execute('DELETE FROM eventos WHERE usuario_id = ?', (usuario_id,))
+        connection.execute('DELETE FROM tareas WHERE usuario_id = ?', (usuario_id,))
+        connection.executemany('DELETE FROM recordatorios WHERE destino = ?', [(c,) for c in usuario['chats']])
+        connection.execute('DELETE FROM usuarios WHERE id = ?', (usuario_id,))
+        connection.commit()
+
+
+def id_admin_principal():
+    """El primer administrador: dueño de lo que había antes de los usuarios (eventos, correo, Google)."""
+    with get_db_connection() as connection:
+        fila = connection.execute('SELECT MIN(id) FROM usuarios WHERE es_admin = 1').fetchone()
+    return fila[0] if fila else None
+
+
+def id_dueno():
+    """Id del usuario actual; sin ninguno fijado (procesos de fondo), el administrador principal."""
+    usuario = _usuario.get()
+    return usuario['id'] if usuario else id_admin_principal()
+
+
+def usuario_por_chat(chat):
+    """El usuario dueño de un chat del bot. Un chat que no es de nadie se trata como del administrador."""
+    for usuario in listar_usuarios():
+        if usuario['estado'] == 'activo' and chat in usuario['chats']:
+            return usuario
+    admin = id_admin_principal()
+    return obtener_usuario(admin) if admin else None
+
+
+def chats_ajenos(usuario_id):
+    """Chats que pertenecen a otros usuarios."""
+    return {c for u in listar_usuarios() if u['id'] != usuario_id for c in u['chats']}

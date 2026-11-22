@@ -2625,3 +2625,269 @@ tbody tr:last-child td {
         max-width: 100%;
     }
 }
+
+/* ==========================================================================
+   Inicio de sesión y cuenta
+   ========================================================================== */
+
+.login-body {
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: calc(1.5rem + env(safe-area-inset-top)) 1rem calc(1.5rem + env(safe-area-inset-bottom));
+}
+
+.login-caja {
+    width: min(400px, 100%);
+    padding: 2rem 1.75rem;
+    border-radius: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    overflow-wrap: anywhere;
+}
+
+.login-marca {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 1.4rem;
+    font-weight: 800;
+    font-size: 1.1rem;
+}
+
+.login-marca img {
+    width: 36px;
+    height: 36px;
+}
+
+.login-caja h1 {
+    margin: 0 0 1rem;
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.95rem;
+}
+
+.login-form .input {
+    width: 100%;
+    font-size: 16px;
+    min-height: 2.75rem;
+}
+
+.login-form .btn {
+    min-height: 2.9rem;
+    font-size: 1rem;
+}
+
+.login-recordar {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.login-recordar input {
+    width: 1.1rem;
+    height: 1.1rem;
+    margin-top: 0.1rem;
+    accent-color: var(--accent);
+}
+
+.login-texto,
+.login-pie {
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}
+
+.login-pie {
+    margin: 1.1rem 0 0;
+    font-size: 0.8rem;
+    color: var(--text-faint);
+}
+
+.login-aviso,
+.aviso-ok {
+    margin: 0 0 1rem;
+    padding: 0.7rem 0.9rem;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--success) 13%, transparent);
+    color: var(--success);
+    font-weight: 600;
+}
+
+.aviso-ok {
+    margin: 0;
+}
+
+.login-caja .alert {
+    margin-bottom: 1rem;
+}
+
+.sidebar-usuario {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.5rem 0.6rem 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+}
+
+.sidebar-usuario form {
+    margin: 0;
+}
+
+.sidebar-usuario-nombre {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 650;
+    font-size: 0.9rem;
+    color: var(--text);
+}
+
+.sidebar-salir {
+    padding: 0.3rem 0.6rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.sidebar-salir:hover {
+    color: var(--danger);
+}
+
+.cuenta-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    max-width: 560px;
+}
+
+.cuenta-card form {
+    margin: 0;
+}
+
+.cuenta-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.cuenta-chats {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-weight: 600;
+}
+
+/* El acceso a la cuenta en el inicio solo hace falta en el móvil (en el ordenador está en la barra lateral) */
+.solo-movil {
+    display: none;
+}
+
+@media (max-width: 860px) {
+    .solo-movil {
+        display: inline-flex;
+    }
+}
+
+/* Registro y lista de usuarios (página Cuenta del administrador) */
+.login-cambio {
+    margin: 1.1rem 0 0;
+    text-align: center;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.login-cambio a {
+    color: var(--accent);
+    font-weight: 650;
+}
+
+.registro-seccion {
+    margin: 0.4rem 0 0;
+    font-weight: 650;
+    color: var(--text);
+}
+
+.registro-seccion span {
+    font-weight: 500;
+    font-size: 0.85rem;
+    color: var(--text-faint);
+}
+
+.cuenta-usuarios {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.cuenta-usuarios li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.cuenta-usuario-datos {
+    min-width: 0;
+    flex: 1 1 12rem;
+    overflow-wrap: anywhere;
+}
+
+.cuenta-usuario-datos span {
+    color: var(--text-muted);
+}
+
+.cuenta-usuario-datos small {
+    display: block;
+    margin-top: 0.2rem;
+    color: var(--text-faint);
+}
+
+.cuenta-usuario-botones {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.insignia {
+    display: inline-grid;
+    place-items: center;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.3rem;
+    margin-left: 0.2rem;
+    border-radius: 999px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    vertical-align: middle;
+}

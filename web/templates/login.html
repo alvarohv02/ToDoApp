@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+        <title>Iniciar sesión · Mi Notion</title>
+        <link rel="icon" href="{{ url_for('static', filename='img/Logo_Notas.ico') }}">
+        <link rel="manifest" href="/manifest.webmanifest">
+        <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-title" content="Mi Notion">
+        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f6fa">
+        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1016">
+        <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+        <script>
+            try {
+                var tema = localStorage.getItem('tema');
+                if (tema === 'light' || tema === 'dark') document.documentElement.dataset.theme = tema;
+            } catch (e) {}
+        </script>
+    </head>
+    <body class="login-body">
+        <main class="login-caja">
+            <div class="login-marca">
+                <img src="{{ url_for('static', filename='img/Logo_Notas.png') }}" alt="">
+                <span>Mi&nbsp;Notion</span>
+            </div>
+
+            {% if sin_usuarios %}
+            <h1>Falta crear el primer usuario</h1>
+            <p class="login-texto">En el servidor, ejecuta <code>python usuarios.py crear</code> dentro del contenedor
+                (ver <em>deploy/INSTALAR.md</em>) y vuelve a cargar esta página.</p>
+            {% else %}
+            <h1>Iniciar sesión</h1>
+            {% if salir %}<p class="login-aviso">Has cerrado la sesión.</p>{% endif %}
+            {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+
+            <form method="post" action="/login" class="login-form">
+                <input type="hidden" name="siguiente" value="{{ siguiente }}">
+                <label class="field">
+                    <span>Usuario</span>
+                    <input class="input" name="usuario" value="{{ usuario or '' }}" required autofocus
+                           autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
+                </label>
+                <label class="field">
+                    <span>Contraseña</span>
+                    <input class="input" type="password" name="clave" required autocomplete="current-password">
+                </label>
+                <label class="login-recordar">
+                    <input type="checkbox" name="recordar" value="1" checked>
+                    Mantener la sesión iniciada en este dispositivo
+                </label>
+                <button type="submit" class="btn btn-primary">Entrar</button>
+            </form>
+            <p class="login-pie">Desmárcalo en un ordenador que no sea tuyo: la sesión se cerrará al cerrar el navegador.</p>
+            {% if registro %}<p class="login-cambio">¿No tienes cuenta? <a href="/registro">Regístrate</a></p>{% endif %}
+            {% endif %}
+        </main>
+
+        {% if salir %}
+        <script>
+            // Al cerrar sesión se borra la copia de las páginas que guarda la app instalada
+            if ('caches' in window) {
+                caches.keys().then(function (nombres) { nombres.forEach(function (n) { caches.delete(n); }); });
+            }
+        </script>
+        {% endif %}
+    </body>
+</html>

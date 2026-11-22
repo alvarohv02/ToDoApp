@@ -1893,6 +1893,23 @@ async function renderizarCorreos() {
 
 // --- App instalable -----------------------------------------------------------------
 
+// Si la sesión caduca con la página abierta, la API responde 401: se vuelve al login y, al entrar,
+// a esta misma página
+function vigilarSesion() {
+  const fetchOriginal = window.fetch.bind(window);
+  window.fetch = async (...argumentos) => {
+    const respuesta = await fetchOriginal(...argumentos);
+    if (respuesta.status === 401) {
+      const datos = await respuesta.clone().json().catch(() => ({}));
+      if (datos.login) {
+        const aqui = window.location.pathname + window.location.search;
+        window.location.href = '/login?siguiente=' + encodeURIComponent(aqui);
+      }
+    }
+    return respuesta;
+  };
+}
+
 function iniciarAppInstalable() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -1917,6 +1934,7 @@ function iniciarAppInstalable() {
 }
 
 function iniciarAplicacion() {
+  vigilarSesion();
   iniciarAppInstalable();
   iniciarTema();
   renderizarInicio();

@@ -14,6 +14,7 @@ import asistente
 import avisos
 import db
 import telegram_bot
+import usuarios
 import whatsapp
 
 log = logging.getLogger(__name__)
@@ -45,7 +46,17 @@ def destinos():
     configurados = [grupo for grupo in configurados if grupo]
     if configurados:
         return configurados
-    chats = [n.strip() for n in os.getenv('WHATSAPP_ALLOWED_NUMBERS', '').split(',') if n.strip()][:1]
+    # Con usuarios: cada uno recibe el suyo en su WhatsApp y, si no se puede, en su Telegram
+    if db.hay_usuarios():
+        personas = []
+        for usuario in db.listar_usuarios():
+            chats = usuarios.chats_de(usuario)
+            whatsapp = [c for c in chats if not c.startswith('tg:')][:1]
+            telegram = [c for c in chats if c.startswith('tg:')][:1]
+            if whatsapp + telegram:
+                personas.append(whatsapp + telegram)
+        return personas
+    chats =[n.strip() for n in os.getenv('WHATSAPP_ALLOWED_NUMBERS', '').split(',') if n.strip()][:1]
     chats += [f'tg:{u.strip()}' for u in os.getenv('TELEGRAM_ALLOWED_USERS', '').split(',') if u.strip().isdigit()][:1]
     return [chats] if chats else []
 

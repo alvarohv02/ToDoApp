@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+        <title>Crear cuenta · Mi Notion</title>
+        <link rel="icon" href="{{ url_for('static', filename='img/Logo_Notas.ico') }}">
+        <link rel="manifest" href="/manifest.webmanifest">
+        <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-title" content="Mi Notion">
+        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f6fa">
+        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1016">
+        <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+        <script>
+            try {
+                var tema = localStorage.getItem('tema');
+                if (tema === 'light' || tema === 'dark') document.documentElement.dataset.theme = tema;
+            } catch (e) {}
+        </script>
+    </head>
+    <body class="login-body">
+        <main class="login-caja">
+            <div class="login-marca">
+                <img src="{{ url_for('static', filename='img/Logo_Notas.png') }}" alt="">
+                <span>Mi&nbsp;Notion</span>
+            </div>
+
+            {% if enviado %}
+            <h1>Solicitud enviada</h1>
+            <p class="aviso-ok" role="status">Gracias, {{ datos.nombre }}. Tu cuenta <strong>{{ datos.usuario }}</strong>
+                está pendiente de que el administrador la apruebe.</p>
+            <p class="login-texto">Cuando la apruebe podrás entrar con tu usuario y tu contraseña{% if datos.whatsapp or datos.telegram %}
+                y usar el bot desde el chat que has indicado{% endif %}.</p>
+            <p class="login-cambio"><a href="/login">Ir a iniciar sesión</a></p>
+            {% else %}
+            <h1>Crear cuenta</h1>
+            <p class="login-texto">Empiezas con tus tareas, tu calendario y tus recordatorios vacíos; nadie más los ve.
+                El administrador tiene que aprobar la cuenta antes de que puedas entrar.</p>
+            {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+
+            <form method="post" action="/registro" class="login-form">
+                <label class="field">
+                    <span>Tu nombre</span>
+                    <input class="input" name="nombre" value="{{ datos.nombre or '' }}" required maxlength="60"
+                           autocomplete="given-name" placeholder="Lucía">
+                </label>
+                <label class="field">
+                    <span>Usuario para entrar</span>
+                    <input class="input" name="usuario" value="{{ datos.usuario or '' }}" required
+                           pattern="[A-Za-z0-9._\-]{2,40}" title="Letras sin tildes, números, puntos o guiones"
+                           autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="lucia">
+                </label>
+                <label class="field">
+                    <span>Contraseña (mínimo 10 caracteres)</span>
+                    <input class="input" type="password" name="clave" required minlength="10" autocomplete="new-password">
+                </label>
+                <label class="field">
+                    <span>Repite la contraseña</span>
+                    <input class="input" type="password" name="repetida" required minlength="10" autocomplete="new-password">
+                </label>
+
+                <p class="registro-seccion">Bot de WhatsApp y Telegram <span>(opcional, se puede poner después)</span></p>
+                <label class="field">
+                    <span>Tu WhatsApp, con prefijo</span>
+                    <input class="input" name="whatsapp" value="{{ datos.whatsapp or '' }}" inputmode="tel"
+                           autocomplete="tel" placeholder="34600111222">
+                </label>
+                <label class="field">
+                    <span>Tu id de Telegram</span>
+                    <input class="input" name="telegram" value="{{ datos.telegram or '' }}" inputmode="numeric"
+                           placeholder="123456789">
+                </label>
+                <p class="login-pie">Para saber tu id de Telegram, escribe cualquier cosa al bot y te lo dirá.</p>
+                <button type="submit" class="btn btn-primary">Crear cuenta</button>
+            </form>
+            <p class="login-cambio">¿Ya tienes cuenta? <a href="/login">Inicia sesión</a></p>
+            {% endif %}
+        </main>
+    </body>
+</html>

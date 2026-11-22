@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% block titulo %}Cuenta{% endblock %}
+
+{% block contenido %}
+<div class="page">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Tu cuenta</p>
+            <h1>{{ usuario.nombre }}</h1>
+            <p class="page-subtitle">Usuario <strong>{{ usuario.usuario }}</strong>{% if usuario.es_admin %} · administrador{% endif %}</p>
+        </div>
+        <form method="post" action="/logout" class="page-actions">
+            <button type="submit" class="btn btn-ghost">Cerrar sesión</button>
+        </form>
+    </header>
+
+    {% if mensaje %}<p class="aviso-ok" role="status">{{ mensaje }}</p>{% endif %}
+    {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+
+    <section class="card cuenta-card">
+        <h2 class="card-title">Cambiar la contraseña</h2>
+        <p class="card-text">Al cambiarla se cierra la sesión en tus otros dispositivos.</p>
+        <form method="post" class="cuenta-form">
+            <input type="hidden" name="accion" value="clave">
+            <input type="hidden" name="usuario" value="{{ usuario.usuario }}" autocomplete="username">
+            <label class="field">
+                <span>Contraseña actual</span>
+                <input class="input" type="password" name="actual" required autocomplete="current-password">
+            </label>
+            <label class="field">
+                <span>Contraseña nueva (mínimo 10 caracteres)</span>
+                <input class="input" type="password" name="nueva" required minlength="10" autocomplete="new-password">
+            </label>
+            <label class="field">
+                <span>Repite la nueva</span>
+                <input class="input" type="password" name="repetida" required minlength="10" autocomplete="new-password">
+            </label>
+            <div><button type="submit" class="btn btn-primary">Cambiar contraseña</button></div>
+        </form>
+    </section>
+
+    <section class="card cuenta-card">
+        <h2 class="card-title">Sesiones abiertas</h2>
+        <p class="card-text">Si has entrado en un dispositivo que no es tuyo o lo has perdido, cierra la sesión en todos
+            (incluido este).</p>
+        <form method="post">
+            <input type="hidden" name="accion" value="cerrar_todas">
+            <button type="submit" class="btn btn-danger">Cerrar sesión en todos los dispositivos</button>
+        </form>
+    </section>
+
+    <section class="card cuenta-card">
+        <h2 class="card-title">Bot de WhatsApp y Telegram</h2>
+        <p class="card-text">Lo que apuntes desde estos chats (tareas, eventos, recordatorios) es tuyo, igual que en la web.</p>
+        {% if usuario.es_admin %}
+        <ul class="cuenta-chats">
+            {% for chat in chats %}
+            <li>{{ '✈️ Telegram' if chat.startswith('tg:') else '💬 WhatsApp' }} · …{{ chat[-4:] }}</li>
+            {% else %}
+            <li>Ninguno todavía.</li>
+            {% endfor %}
+        </ul>
+        <p class="card-text">Los tuyos se cambian en el servidor (<code>python usuarios.py chats</code>).</p>
+        {% else %}
+        <form method="post" class="cuenta-form">
+            <input type="hidden" name="accion" value="chats">
+            <label class="field">
+                <span>Tu WhatsApp, con prefijo</span>
+                <input class="input" name="whatsapp" value="{{ whatsapp }}" inputmode="tel" autocomplete="tel"
+                       placeholder="34600111222">
+            </label>
+            <label class="field">
+                <span>Tu id de Telegram (escribe al bot y te lo dirá)</span>
+                <input class="input" name="telegram" value="{{ telegram }}" inputmode="numeric" placeholder="123456789">
+            </label>
+            <div><button type="submit" class="btn btn-primary">Guardar</button></div>
+        </form>
+        {% endif %}
+    </section>
+
+    {% if usuario.es_admin %}
+    <section class="card cuenta-card" id="usuarios">
+        <h2 class="card-title">Usuarios</h2>
+        {% if pendientes %}
+        <p class="card-text">Se han registrado desde la web y esperan tu aprobación:</p>
+        <ul class="cuenta-usuarios">
+            {% for otro in pendientes %}
+            <li>
+                <div class="cuenta-usuario-datos">
+                    <strong>{{ otro.nombre }}</strong> <span>· {{ otro.usuario }}</span>
+                    <small>{{ otro.creado_en[:10] }}{% for chat in otro.chats %} · {{ '✈️ ' ~ chat[3:] if chat.startswith('tg:') else '💬 +' ~ chat }}{% endfor %}</small>
+                </div>
+                <div class="cuenta-usuario-botones">
+                    <form method="post"><input type="hidden" name="accion" value="aprobar"><input type="hidden" name="id" value="{{ otro.id }}">
+                        <button type="submit" class="btn btn-primary">Aprobar</button></form>
+                    <form method="post" onsubmit="return confirm('¿Rechazar la solicitud de {{ otro.nombre|e }}?')">
+                        <input type="hidden" name="accion" value="rechazar"><input type="hidden" name="id" value="{{ otro.id }}">
+                        <button type="submit" class="btn btn-ghost">Rechazar</button></form>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="card-text">No hay solicitudes pendientes. Quien quiera una cuenta puede crearla en <code>/registro</code>.</p>
+        {% endif %}
+        {% if activos %}
+        <p class="card-text">Con cuenta:</p>
+        <ul class="cuenta-usuarios">
+            {% for otro in activos %}
+            <li>
+                <div class="cuenta-usuario-datos">
+                    <strong>{{ otro.nombre }}</strong> <span>· {{ otro.usuario }}</span>
+                    <small>{% for chat in otro.chats %}{{ ' · ' if not loop.first }}{{ '✈️ Telegram' if chat.startswith('tg:') else '💬 WhatsApp' }}{% else %}Sin bot{% endfor %}</small>
+                </div>
+                <div class="cuenta-usuario-botones">
+                    <form method="post" onsubmit="return confirm('¿Eliminar a {{ otro.nombre|e }}? Se borran también sus tareas, eventos y recordatorios.')">
+                        <input type="hidden" name="accion" value="eliminar"><input type="hidden" name="id" value="{{ otro.id }}">
+                        <button type="submit" class="btn btn-ghost">Eliminar</button></form>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

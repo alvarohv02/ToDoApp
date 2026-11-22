@@ -211,6 +211,44 @@ El navegador mostrará "No seguro" porque la URL es http://, pero el tráfico va
 del túnel de Tailscale. El certificado de Let's Encrypt no se puede sacar como el del webhook,
 porque Let's Encrypt no llega a una IP de Tailscale.
 
+## Usuarios e inicio de sesión [notion_bot]
+
+La web pide usuario y contraseña. Las contraseñas se guardan solo como hash (scrypt con sal).
+Cada usuario tiene sus **tareas**, su **calendario** y sus **recordatorios**, que nadie más ve; el
+**correo**, Google Calendar y el estado del bot solo los ve el administrador (el primer usuario que
+se crea). Lo que había antes de crear usuarios pasa a ser del administrador.
+
+El administrador se crea desde la terminal. Los demás se **registran desde la web** (enlace
+*Regístrate* en la página de inicio de sesión, o `/registro`): ponen su nombre, usuario, contraseña
+y, si quieren, su WhatsApp y su id de Telegram. La cuenta queda **pendiente** hasta que el
+administrador la aprueba en su página *Cuenta* (le llega un aviso por el bot y un número rojo junto
+a su nombre). Empiezan con todo vacío. Para desactivar el registro: `REGISTRO=no` en el `.env`.
+
+Desde la terminal, dentro del contenedor (la contraseña no se ve al escribir):
+
+```bash
+docker exec -it notion-bot python usuarios.py crear     # el primero es el administrador
+docker exec -it notion-bot python usuarios.py listar
+docker exec -it notion-bot python usuarios.py aprobar USUARIO         # igual que el botón de la web
+docker exec -it notion-bot python usuarios.py clave USUARIO           # contraseña nueva
+docker exec -it notion-bot python usuarios.py chats USUARIO "34600333444,tg:987654321"
+docker exec -it notion-bot python usuarios.py borrar USUARIO
+```
+
+**Chats del bot**: cada usuario tiene sus chats de WhatsApp y Telegram (los pone al registrarse o
+después en *Cuenta*); lo que cree desde ellos es suyo y el resumen de buenos días le llega con lo
+suyo. El bot contesta a los usuarios aprobados sin tocar el `.env`. El administrador sin chats
+apuntados se queda con todos los del `.env` que no sean de otro usuario. Con WhatsApp Cloud API en
+modo de pruebas, Meta solo deja escribir a los números añadidos como destinatarios de prueba.
+
+**No volver a iniciar sesión**: al entrar, deja marcado *Mantener la sesión iniciada*. La cookie
+de sesión dura `SESION_DIAS` días (90 por defecto) y se renueva con cada visita: mientras uses la
+web al menos una vez en ese plazo, no te la vuelve a pedir. Desde *Cuenta* se cambia la contraseña
+y se puede cerrar la sesión en todos los dispositivos.
+
+La clave que firma las cookies se crea sola en `data/clave_sesiones` (o se toma de `SECRET_KEY` en
+el `.env`). Si se borra o se cambia, todas las sesiones se cierran.
+
 ## Instalar la web como app en el móvil [admin]
 
 La web es una *app instalable* (PWA): desde Safari o Chrome se añade a la pantalla de inicio y se

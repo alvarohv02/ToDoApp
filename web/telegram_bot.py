@@ -11,6 +11,7 @@ import time
 import requests
 
 import asistente
+import usuarios
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,8 @@ def _usuarios_permitidos():
 
 def _autorizado(usuario):
     permitidos = _usuarios_permitidos()
+    if f'tg:{usuario.get("id")}' in usuarios.chats_del_bot():
+        return True  # usuario aprobado en la web
     return str(usuario.get('id')) in permitidos or (usuario.get('username') or '').lower() in permitidos
 
 
@@ -93,8 +96,10 @@ def _procesar(update):
 
     if not _autorizado(usuario):
         log.warning('Mensaje de Telegram de un usuario no autorizado: %s', usuario)
-        # Le decimos su id para que el dueño pueda añadirlo a TELEGRAM_ALLOWED_USERS si quiere
-        enviar_mensaje(chat_id, f'No estás autorizado para usar este bot. Tu id de Telegram es {usuario.get("id")}.')
+        # Le decimos su id para que lo ponga al registrarse en la web (o en su página Cuenta)
+        enviar_mensaje(chat_id, f'Todavía no puedes usar este bot. Tu id de Telegram es {usuario.get("id")}: '
+                                'ponlo al registrarte en la web (o en tu página Cuenta) y, cuando el '
+                                'administrador apruebe tu cuenta, ya podrás escribirme.')
         return
 
     texto = _texto_de(mensaje)

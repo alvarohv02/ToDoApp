@@ -2,6 +2,7 @@
 
 Todo se ejecuta en tu servidor; no se envía nada a servicios de IA externos.
 """
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 import logging
 import re
@@ -13,6 +14,7 @@ import eventos
 import herramientas
 import llm_local
 import reglas
+import usuarios
 from fechas import (DIAS_SEMANA_BONITOS, extraer_fecha, extraer_momento, formatear, normalizar, numeros_a_digitos,
                     rango_periodo)
 
@@ -125,16 +127,38 @@ def _lineas_eventos(lista, hoy, con_fecha=True):
 
 
 def _destinos(telefono):
-    """Todos los chats de la misma persona, según CUENTAS_VINCULADAS en el .env.
+    """Todos los chats de la misma persona: los de su usuario y los de CUENTAS_VINCULADAS en el .env.
 
-    Formato: grupos separados por ';' y chats de cada grupo por ','. Ejemplo:
+    Formato de CUENTAS_VINCULADAS: grupos separados por ';' y chats de cada grupo por ','. Ejemplo:
     CUENTAS_VINCULADAS=34600111222,tg:123456789;34600333444,tg:987654321
     """
+    destinos = [telefono]
     for grupo in os.getenv('CUENTAS_VINCULADAS', '').split(';'):
         chats = [c.strip() for c in grupo.split(',') if c.strip()]
         if telefono in chats:
-            return chats
-    return [telefono]
+            destinos += chats
+    usuario = db.usuario_actual()
+    if usuario is not None:
+        suyos = usuarios.chats_de(usuario)
+        if telefono in suyos:
+            destinos += suyos
+    return list(dict.fromkeys(destinos))
+
+
+def _ve_el_correo():
+    """El correo configurado en el .env es del administrador: los demás usuarios no lo ven."""
+    usuario = db.usuario_actual()
+    return usuario is None or usuario['es_admin']
+
+
+@contextmanager
+def _como_dueno(telefono):
+    """Atiende al chat como su usuario: sus eventos y sus recordatorios, no los de otro."""
+    marca = db.usar_usuario(db.usuario_por_chat(telefono))
+    try:
+        yield
+    finally:
+        db.soltar_usuario(marca)
 
 
 def _linea_recordatorio(recordatorio, hoy, con_fecha=True, con_canal=False):
@@ -175,6 +199,11 @@ def _titulo_periodo(periodo, desde=None, hasta=None):
 
 def resumen_del_dia(telefono, hoy):
     """El mensaje de buenos días: lo de hoy (eventos, tareas, avisos y lo atrasado) y el correo sin leer."""
+    with _como_dueno(telefono):
+        return _resumen_del_dia(telefono, hoy)
+
+
+def _resumen_del_dia(telefono, hoy):
     dia = f'{DIAS_SEMANA_BONITOS[hoy.weekday()].capitalize()} {hoy:%d/%m}'
     agenda = _agenda(telefono, dia, hoy, hoy, hoy, con_atrasadas=True)
     if agenda is None:
@@ -185,6 +214,8 @@ def resumen_del_dia(telefono, hoy):
 
 
 def _linea_correo():
+    if not _ve_el_correo():
+        return ''
     cuentas = correo.resumen_cuentas()
     total = sum(c['no_leidos'] for c in cuentas)
     if not total:
@@ -203,6 +234,8 @@ HECHO_CORREO = {'leido': '✓ Marcado como leído', 'archivar': '🗄️ Archiva
 
 
 def _listar_correos(telefono):
+    if not _ve_el_correo():
+        return 'Tu usuario aún no tiene cuentas de correo conectadas.'
     if not correo.configurado():
         return 'Aún no hay cuentas de correo conectadas. Se añaden en el .env del servidor (ver deploy/INSTALAR.md).'
     cuentas = correo.resumen_cuentas()
@@ -229,6 +262,8 @@ def _listar_correos(telefono):
 
 
 def _accion_correo(telefono, accion, pendiente):
+    if not _ve_el_correo():
+        return 'Tu usuario aún no tiene cuentas de correo conectadas.'
     if not pendiente or pendiente.get('tipo') != 'correos':
         return 'Primero escribe *correos* para ver la lista.'
     db.guardar_pendiente(telefono, pendiente)  # se puede seguir con la misma lista
@@ -999,6 +1034,11 @@ def _deshacer(telefono):
 
 def responder(telefono, texto, hoy=None, ahora=None):
     """Procesa un mensaje del usuario (puede llevar varias peticiones) y devuelve el texto de respuesta."""
+    with _como_dueno(telefono):
+        return _responder(telefono, texto, hoy, ahora)
+
+
+def _responder(telefono, texto, hoy=None, ahora=None):
     if ahora is None:
         ahora = datetime.combine(hoy, datetime.now().time()) if hoy else datetime.now()
     hoy = ahora.date()

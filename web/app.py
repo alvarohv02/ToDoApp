@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, g, jsonify, render_template, request, send_from_directory
 
 # El .env vive en la raíz del proyecto (un nivel por encima de /web)
 load_dotenv(Path(__file__).resolve().parent.parent / '.env')
@@ -15,16 +15,25 @@ import db
 import eventos
 import google_cal
 import resumen
+import sesiones
 import telegram_bot
+import usuarios
 from whatsapp import whatsapp_bp
 
 app = Flask(__name__)
 app.register_blueprint(whatsapp_bp)
+# Inicio de sesión: todas las páginas y la API lo piden salvo el webhook, /legal/ y los estáticos
+sesiones.configurar(app)
 
 
 @app.context_processor
 def datos_comunes():
-    return {'persona_defecto': db.persona_por_defecto(), 'nombre_usuario': os.getenv('NOMBRE_USUARIO', '').strip()}
+    usuario = g.get('usuario')
+    nombre = usuario['nombre'] if usuario else os.getenv('NOMBRE_USUARIO', '').strip()
+    # Al administrador se le avisa de las cuentas nuevas que esperan su aprobación
+    solicitudes = db.contar_pendientes() if usuario and usuario['es_admin'] else 0
+    return {'persona_defecto': db.persona_por_defecto(), 'nombre_usuario': nombre, 'usuario': usuario,
+            'solicitudes': solicitudes}
 
 
 @app.route('/')
@@ -143,9 +152,10 @@ def recordatorio_a_json(recordatorio):
 
 
 def canales_recordatorio():
-    """Chats a los que se pueden mandar avisos desde la web: los de WhatsApp y Telegram configurados."""
-    whatsapp = [n.strip() for n in os.getenv('WHATSAPP_ALLOWED_NUMBERS', '').split(',') if n.strip()]         if os.getenv('TOKEN') and os.getenv('WHATSAPP_PHONE_NUMBER_ID') else []
-    telegram = [u.strip() for u in os.getenv('TELEGRAM_ALLOWED_USERS', '').split(',') if u.strip().isdigit()]         if os.getenv('TELEGRAM_TOKEN') else []
+    """Chats a los que el usuario puede mandarse avisos desde la web: los suyos de WhatsApp y Telegram."""
+    suyos = usuarios.chats_de(g.get('usuario'))
+    whatsapp = [c for c in suyos if not c.startswith('tg:')]
+    telegram = [c[3:] for c in suyos if c.startswith('tg:')]
     canales = []
     for numero in whatsapp:
         hasta = avisos.ventana_hasta(numero)
@@ -252,7 +262,7 @@ def recordatorios_api():
             return jsonify({'error': error.mensaje}), 400
         nuevo = db.crear_recordatorio(destino, texto, cuando)
         return jsonify(recordatorio_a_json(db.obtener_recordatorio(nuevo))), 201
-    return jsonify([recordatorio_a_json(r) for r in db.listar_recordatorios()])
+    return jsonify([recordatorio_a_json(r) for r in db.listar_recordatorios(usuarios.chats_de(g.usuario))])
 
 
 @app.route('/api/recordatorios/canales')
@@ -263,6 +273,9 @@ def recordatorios_canales():
 @app.route('/api/recordatorios/<int:recordatorio_id>', methods=['PUT', 'DELETE'])
 def recordatorio_api(recordatorio_id):
     recordatorio = db.obtener_recordatorio(recordatorio_id)
+    # Solo los recordatorios de los chats de quien ha iniciado sesión
+    if recordatorio is not None and recordatorio['destino'] not in usuarios.chats_de(g.usuario):
+        recordatorio = None
     if recordatorio is None or recordatorio['estado'] == 'cancelado':
         return jsonify({'error': 'Recordatorio no encontrado'}), 404
 

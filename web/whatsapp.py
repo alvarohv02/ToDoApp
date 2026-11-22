@@ -11,6 +11,7 @@ from flask import Blueprint, Response, abort, request
 
 import asistente
 import db
+import usuarios
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -25,8 +26,10 @@ def _config(nombre, defecto=None):
 
 
 def _numeros_permitidos():
+    """Los del .env más los de los usuarios aprobados en la web."""
     valor = _config('WHATSAPP_ALLOWED_NUMBERS') or _config('WHATSAPP_TO') or ''
-    return {n.strip().lstrip('+') for n in valor.split(',') if n.strip()}
+    numeros = {n.strip().lstrip('+') for n in valor.split(',') if n.strip()}
+    return numeros | {c for c in usuarios.chats_del_bot() if not c.startswith('tg:')}
 
 
 def _firma_valida(cuerpo, cabecera):
