@@ -56,6 +56,9 @@ def init_db():
         # Cada tarea es de un usuario. Las de antes de haber usuarios (sin dueño) son del administrador
         if 'usuario_id' not in columnas:
             connection.execute('ALTER TABLE tareas ADD COLUMN usuario_id INTEGER')
+        # Tarea compartida con un grupo (familia): la ven y la cambian todos sus miembros
+        if 'grupo_id' not in columnas:
+            connection.execute('ALTER TABLE tareas ADD COLUMN grupo_id INTEGER')
         connection.execute('CREATE INDEX IF NOT EXISTS idx_tareas_fecha_limite ON tareas (fecha_limite)')
         connection.execute('CREATE INDEX IF NOT EXISTS idx_tareas_status ON tareas (status)')
 
@@ -118,6 +121,36 @@ def init_db():
         columnas = {fila['name'] for fila in connection.execute('PRAGMA table_info(eventos)')}
         if 'usuario_id' not in columnas:
             connection.execute('ALTER TABLE eventos ADD COLUMN usuario_id INTEGER')
+        if 'grupo_id' not in columnas:
+            connection.execute('ALTER TABLE eventos ADD COLUMN grupo_id INTEGER')
+        columnas = {fila['name'] for fila in connection.execute('PRAGMA table_info(recordatorios)')}
+        if 'grupo_id' not in columnas:
+            connection.execute('ALTER TABLE recordatorios ADD COLUMN grupo_id INTEGER')
+
+        # Grupos (familias): qué tipos de cosas se pueden compartir en él y quién está dentro.
+        # Un miembro 'invitado' aún no ha aceptado: no ve nada del grupo
+        connection.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS grupos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT NOT NULL,
+                comparte TEXT NOT NULL DEFAULT 'tareas,eventos,recordatorios',
+                creado_por INTEGER,
+                creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            '''
+        )
+        connection.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS grupo_miembros (
+                grupo_id INTEGER NOT NULL,
+                usuario_id INTEGER NOT NULL,
+                estado TEXT NOT NULL DEFAULT 'invitado',
+                invitado_por INTEGER,
+                PRIMARY KEY (grupo_id, usuario_id)
+            )
+            '''
+        )
 
         # Usuarios de la web. La contraseña se guarda solo como hash (scrypt con sal, de Werkzeug).
         # chats: sus chats del bot ("34600111222,tg:123456789"), para saber de quién es cada mensaje.
@@ -206,15 +239,17 @@ def row_to_task(row):
         'status': row['status'],
         'fecha': row['fecha'],
         'persona': row['persona'],
+        'grupo_id': row['grupo_id'],
+        'usuario_id': row['usuario_id'],
     }
 
 
 def fetch_all_tasks():
-    condicion, parametros = _filtro_dueno()
+    condicion, parametros = _filtro_dueno('tareas')
     with get_db_connection() as connection:
         rows = connection.execute(
             f'''
-            SELECT id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona
+            SELECT id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona, grupo_id, usuario_id
             FROM tareas
             WHERE {condicion}
             ORDER BY
@@ -232,11 +267,11 @@ def fetch_all_tasks():
 
 
 def fetch_task(task_id):
-    condicion, parametros = _filtro_dueno()
+    condicion, parametros = _filtro_dueno('tareas')
     with get_db_connection() as connection:
         row = connection.execute(
             f'''
-            SELECT id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona
+            SELECT id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona, grupo_id, usuario_id
             FROM tareas
             WHERE id = ? AND {condicion}
             ''',
@@ -278,6 +313,11 @@ def build_task_payload(data, existing=None):
     if not nombre:
         raise DatosNoValidos('El nombre de la tarea es obligatorio')
 
+    if 'grupo_id' in data:
+        grupo_id = comprobar_grupo('tareas', data.get('grupo_id'), existing or None)
+    else:
+        grupo_id = existing.get('grupo_id')
+
     if not importancia:
         raise DatosNoValidos('La importancia de la tarea es obligatoria')
 
@@ -296,6 +336,7 @@ def build_task_payload(data, existing=None):
         'status': status,
         'fecha': fecha,
         'persona': persona,
+        'grupo_id': grupo_id,
     }
 
 
@@ -305,15 +346,16 @@ def insert_task(data):
     with get_db_connection() as connection:
         connection.execute(
             '''
-            INSERT INTO tareas (id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona, usuario_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tareas (id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona, usuario_id,
+                                grupo_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
-            (*(task[campo] for campo in CAMPOS), id_dueno()),
+            (*(task[campo] for campo in CAMPOS), id_dueno(), task['grupo_id']),
         )
         connection.commit()
 
     _anotar({'accion': 'borrar', 'tabla': 'tareas', 'id': task['id']})
-    return task
+    return fetch_task(task['id']) or task
 
 
 def update_task(task_id, data):
@@ -324,13 +366,14 @@ def update_task(task_id, data):
 
     task = build_task_payload(data, existing)
     _anotar_estado('tareas', task_id)
-    condicion, parametros = _filtro_dueno()
+    condicion, parametros = _filtro_dueno('tareas')
 
     with get_db_connection() as connection:
         connection.execute(
             f'''
             UPDATE tareas
-            SET nombre = ?, importancia = ?, fecha_limite = ?, hora_limite = ?, status = ?, fecha = ?, persona = ?
+            SET nombre = ?, importancia = ?, fecha_limite = ?, hora_limite = ?, status = ?, fecha = ?, persona = ?,
+                grupo_id = ?
             WHERE id = ? AND {condicion}
             ''',
             (
@@ -341,13 +384,14 @@ def update_task(task_id, data):
                 task['status'],
                 task['fecha'],
                 task['persona'],
+                task['grupo_id'],
                 task['id'],
                 *parametros,
             ),
         )
         connection.commit()
 
-    return task
+    return fetch_task(task_id)
 
 
 def delete_task(task_id):
@@ -355,7 +399,7 @@ def delete_task(task_id):
     if fetch_task(task_id) is None:
         return False  # no existe o es de otro usuario
     _anotar_estado('tareas', task_id)
-    condicion, parametros = _filtro_dueno()
+    condicion, parametros = _filtro_dueno('tareas')
     with get_db_connection() as connection:
         cursor = connection.execute(f'DELETE FROM tareas WHERE id = ? AND {condicion}', (task_id, *parametros))
         connection.commit()
@@ -436,25 +480,38 @@ def recuperar_pendiente(telefono, minutos=15):
 # --- Recordatorios --------------------------------------------------------------
 # "cuando" se guarda como hora local 'AAAA-MM-DD HH:MM' (el contenedor usa TZ=Europe/Madrid)
 
-def crear_recordatorio(destino, texto, cuando):
+def crear_recordatorio(destino, texto, cuando, grupo_id=None):
     with get_db_connection() as connection:
         cursor = connection.execute(
-            'INSERT INTO recordatorios (destino, texto, cuando) VALUES (?, ?, ?)',
-            (destino, texto, cuando.strftime('%Y-%m-%d %H:%M')),
+            'INSERT INTO recordatorios (destino, texto, cuando, grupo_id) VALUES (?, ?, ?, ?)',
+            (destino, texto, cuando.strftime('%Y-%m-%d %H:%M'), grupo_id),
         )
         connection.commit()
     _anotar({'accion': 'borrar', 'tabla': 'recordatorios', 'id': cursor.lastrowid})
     return cursor.lastrowid
 
 
-def recordatorios_pendientes(destinos):
-    """Recordatorios pendientes de uno o varios chats (p. ej. el WhatsApp y el Telegram de una persona)."""
+def _de_estos_chats(destinos):
+    """(condición, parámetros): recordatorios de esos chats o de los grupos del usuario actual."""
     destinos = [destinos] if isinstance(destinos, str) else list(destinos)
+    condiciones = [f'destino IN ({", ".join("?" * len(destinos))})'] if destinos else []
+    parametros = list(destinos)
+    grupos, de_grupos = _de_mis_grupos('recordatorios')
+    if de_grupos:
+        condiciones.append(grupos)
+        parametros += de_grupos
+    return '(' + (' OR '.join(condiciones) or '0') + ')', parametros
+
+
+def recordatorios_pendientes(destinos):
+    """Recordatorios pendientes de uno o varios chats (p. ej. el WhatsApp y el Telegram de una persona)
+    y los de sus grupos."""
+    condicion, parametros = _de_estos_chats(destinos)
     with get_db_connection() as connection:
         rows = connection.execute(
-            f"SELECT id, destino, texto, cuando FROM recordatorios WHERE destino IN ({', '.join('?' * len(destinos))}) "
+            f"SELECT id, destino, texto, cuando, grupo_id FROM recordatorios WHERE {condicion} "
             "AND estado = 'pendiente' ORDER BY cuando",
-            destinos,
+            parametros,
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -462,7 +519,7 @@ def recordatorios_pendientes(destinos):
 def recordatorios_vencidos(ahora):
     with get_db_connection() as connection:
         rows = connection.execute(
-            "SELECT id, destino, texto, cuando, intentos FROM recordatorios "
+            "SELECT id, destino, texto, cuando, intentos, grupo_id FROM recordatorios "
             "WHERE estado = 'pendiente' AND cuando <= ? ORDER BY cuando",
             (ahora.strftime('%Y-%m-%d %H:%M'),),
         ).fetchall()
@@ -493,19 +550,16 @@ def ultimo_mensaje_usuario(telefono):
 def listar_recordatorios(destinos=None, dias_historial=30):
     """Pendientes primero (por fecha) y después los enviados o fallidos de los últimos días.
 
-    Con destinos, solo los de esos chats (los de un usuario).
+    Con destinos, solo los de esos chats (los de un usuario) y los de sus grupos.
     """
     filtro, parametros = '', []
     if destinos is not None:
-        destinos = list(destinos)
-        if not destinos:
-            return []
-        filtro = f'AND destino IN ({", ".join("?" * len(destinos))})'
-        parametros = destinos
+        condicion, parametros = _de_estos_chats(destinos)
+        filtro = f'AND {condicion}'
     with get_db_connection() as connection:
         rows = connection.execute(
             f'''
-            SELECT id, destino, texto, cuando, estado FROM recordatorios
+            SELECT id, destino, texto, cuando, estado, grupo_id FROM recordatorios
             WHERE (estado = 'pendiente'
                OR (estado IN ('enviado', 'error') AND cuando >= strftime('%Y-%m-%d %H:%M', 'now', 'localtime', ?)))
                {filtro}
@@ -521,14 +575,17 @@ def listar_recordatorios(destinos=None, dias_historial=30):
 def obtener_recordatorio(recordatorio_id):
     with get_db_connection() as connection:
         row = connection.execute(
-            'SELECT id, destino, texto, cuando, estado FROM recordatorios WHERE id = ?',
+            'SELECT id, destino, texto, cuando, estado, grupo_id FROM recordatorios WHERE id = ?',
             (recordatorio_id,),
         ).fetchone()
     return dict(row) if row else None
 
 
-def editar_recordatorio(recordatorio_id, texto, cuando, destino=None):
-    """Cambia texto, hora y (si se indica) el chat; vuelve a dejarlo pendiente para la nueva hora."""
+_SIN_CAMBIO = object()
+
+
+def editar_recordatorio(recordatorio_id, texto, cuando, destino=None, grupo_id=_SIN_CAMBIO):
+    """Cambia texto, hora y (si se indican) el chat y el grupo; vuelve a dejarlo pendiente para la nueva hora."""
     _anotar_estado('recordatorios', recordatorio_id)
     with get_db_connection() as connection:
         connection.execute(
@@ -536,6 +593,8 @@ def editar_recordatorio(recordatorio_id, texto, cuando, destino=None):
             'intentos = 0 WHERE id = ?',
             (texto, cuando.strftime('%Y-%m-%d %H:%M'), destino, recordatorio_id),
         )
+        if grupo_id is not _SIN_CAMBIO:
+            connection.execute('UPDATE recordatorios SET grupo_id = ? WHERE id = ?', (grupo_id, recordatorio_id))
         connection.commit()
 
 
@@ -544,8 +603,9 @@ def editar_recordatorio(recordatorio_id, texto, cuando, destino=None):
 CAMPOS_EVENTO = ('titulo', 'categoria', 'fecha', 'hora_inicio', 'hora_fin', 'repeticion', 'hasta')
 
 
-def _filtro_dueno():
-    """(condición SQL, parámetros) para quedarse con las tareas o eventos del usuario actual.
+def _filtro_dueno(tipo):
+    """(condición SQL, parámetros) para quedarse con las tareas o eventos que ve el usuario actual:
+    los suyos y los compartidos en sus grupos que comparten ese tipo ('tareas' o 'eventos').
 
     Sin usuarios creados todavía no se filtra nada (como antes de existir el inicio de sesión).
     Lo que no tiene dueño es del administrador principal.
@@ -554,48 +614,55 @@ def _filtro_dueno():
     if dueno is None:
         return '1', ()
     if dueno == id_admin_principal():
-        return '(usuario_id = ? OR usuario_id IS NULL)', (dueno,)
-    return 'usuario_id = ?', (dueno,)
+        propio, parametros = '(usuario_id = ? OR usuario_id IS NULL)', [dueno]
+    else:
+        propio, parametros = 'usuario_id = ?', [dueno]
+    grupos, de_grupos = _de_mis_grupos(tipo, dueno)
+    return f'({propio} OR {grupos})', [*parametros, *de_grupos]
 
 
 def listar_eventos():
-    condicion, parametros = _filtro_dueno()
+    condicion, parametros = _filtro_dueno('eventos')
     with get_db_connection() as connection:
         rows = connection.execute(
-            f'SELECT id, {", ".join(CAMPOS_EVENTO)} FROM eventos WHERE {condicion} ORDER BY fecha, hora_inicio',
+            f'SELECT id, {", ".join(CAMPOS_EVENTO)}, grupo_id, usuario_id FROM eventos WHERE {condicion} ORDER BY fecha, hora_inicio',
             parametros,
         ).fetchall()
     return [dict(row) for row in rows]
 
 
 def obtener_evento(evento_id):
-    condicion, parametros = _filtro_dueno()
+    condicion, parametros = _filtro_dueno('eventos')
     with get_db_connection() as connection:
         row = connection.execute(
-            f'SELECT id, {", ".join(CAMPOS_EVENTO)} FROM eventos WHERE id = ? AND {condicion}',
+            f'SELECT id, {", ".join(CAMPOS_EVENTO)}, grupo_id, usuario_id FROM eventos WHERE id = ? AND {condicion}',
             (evento_id, *parametros),
         ).fetchone()
     return dict(row) if row else None
 
 
 def guardar_evento(datos, evento_id=None):
-    """Crea el evento (sin id) o lo sobrescribe. Devuelve su id."""
-    valores = tuple(datos[campo] for campo in CAMPOS_EVENTO)
+    """Crea el evento (sin id) o lo sobrescribe. Devuelve su id.
+
+    Con 'grupo_id' en los datos también cambia el grupo; sin él, lo deja como estaba (o sin grupo, si es nuevo).
+    """
+    campos = CAMPOS_EVENTO + (('grupo_id',) if 'grupo_id' in datos else ())
+    valores = tuple(datos[campo] for campo in campos)
     if evento_id is not None:
         _anotar_estado('eventos', evento_id)
-    condicion, parametros = _filtro_dueno()
+    condicion, parametros = _filtro_dueno('eventos')
     with get_db_connection() as connection:
         if evento_id is None:
             cursor = connection.execute(
-                f'INSERT INTO eventos ({", ".join(CAMPOS_EVENTO)}, usuario_id) '
-                f'VALUES ({", ".join("?" * len(CAMPOS_EVENTO))}, ?)',
+                f'INSERT INTO eventos ({", ".join(campos)}, usuario_id) '
+                f'VALUES ({", ".join("?" * len(campos))}, ?)',
                 (*valores, id_dueno()),
             )
             evento_id = cursor.lastrowid
             _anotar({'accion': 'borrar', 'tabla': 'eventos', 'id': evento_id})
         else:
             connection.execute(
-                f'UPDATE eventos SET {", ".join(f"{c} = ?" for c in CAMPOS_EVENTO)} WHERE id = ? AND {condicion}',
+                f'UPDATE eventos SET {", ".join(f"{c} = ?" for c in campos)} WHERE id = ? AND {condicion}',
                 (*valores, evento_id, *parametros),
             )
         connection.commit()
@@ -606,7 +673,7 @@ def borrar_evento(evento_id):
     if obtener_evento(evento_id) is None:
         return False  # no existe o es de otro usuario
     _anotar_estado('eventos', evento_id)
-    condicion, parametros = _filtro_dueno()
+    condicion, parametros = _filtro_dueno('eventos')
     with get_db_connection() as connection:
         cursor = connection.execute(f'DELETE FROM eventos WHERE id = ? AND {condicion}', (evento_id, *parametros))
         connection.commit()
@@ -895,15 +962,21 @@ def contar_pendientes():
 
 
 def borrar_usuario(usuario_id):
-    """Borra el usuario junto con sus tareas, sus eventos y los recordatorios de sus chats."""
+    """Borra el usuario junto con sus tareas, sus eventos y los recordatorios de sus chats.
+
+    Lo que tenía compartido en un grupo se queda en el grupo.
+    """
     usuario = obtener_usuario(usuario_id)
     if usuario is None:
         return
+    for grupo in grupos_de(usuario_id, estado=None):
+        salir_de_grupo(grupo['id'], usuario_id)
     with get_db_connection() as connection:
-        eventos = [(f[0],) for f in connection.execute('SELECT id FROM eventos WHERE usuario_id = ?', (usuario_id,))]
+        eventos = [(f[0],) for f in connection.execute(
+            'SELECT id FROM eventos WHERE usuario_id = ? AND grupo_id IS NULL', (usuario_id,))]
         connection.executemany('DELETE FROM evento_excepciones WHERE evento_id = ?', eventos)
-        connection.execute('DELETE FROM eventos WHERE usuario_id = ?', (usuario_id,))
-        connection.execute('DELETE FROM tareas WHERE usuario_id = ?', (usuario_id,))
+        connection.execute('DELETE FROM eventos WHERE usuario_id = ? AND grupo_id IS NULL', (usuario_id,))
+        connection.execute('DELETE FROM tareas WHERE usuario_id = ? AND grupo_id IS NULL', (usuario_id,))
         connection.executemany('DELETE FROM recordatorios WHERE destino = ?', [(c,) for c in usuario['chats']])
         connection.execute('DELETE FROM usuarios WHERE id = ?', (usuario_id,))
         connection.commit()
@@ -934,3 +1007,161 @@ def usuario_por_chat(chat):
 def chats_ajenos(usuario_id):
     """Chats que pertenecen a otros usuarios."""
     return {c for u in listar_usuarios() if u['id'] != usuario_id for c in u['chats']}
+
+
+# --- Grupos (familias) ----------------------------------------------------------------------
+# Cada tarea, evento o recordatorio puede pertenecer a un grupo: entonces lo ven y lo cambian
+# todos sus miembros, siempre que el grupo comparta ese tipo de cosas.
+
+TIPOS_GRUPO = {'tareas': 'Tareas', 'eventos': 'Calendario', 'recordatorios': 'Recordatorios'}
+_SUBCONSULTA_GRUPOS = (
+    "grupo_id IN (SELECT m.grupo_id FROM grupo_miembros m JOIN grupos g ON g.id = m.grupo_id "
+    "WHERE m.usuario_id = ? AND m.estado = 'miembro' AND (',' || g.comparte || ',') LIKE ?)"
+)
+
+
+def _de_mis_grupos(tipo, usuario_id=None):
+    """(condición, parámetros) para lo compartido en los grupos del usuario que comparten ese tipo.
+
+    Sin usuario (procesos de fondo sin nadie fijado) no hay grupos: ('0', []).
+    """
+    if usuario_id is None:
+        usuario = _usuario.get()
+        usuario_id = usuario['id'] if usuario else None
+    if usuario_id is None:
+        return '0', []
+    return _SUBCONSULTA_GRUPOS, [usuario_id, f'%,{tipo},%']
+
+
+def _grupo_a_dict(fila):
+    grupo = dict(fila)
+    grupo['comparte'] = [t for t in grupo['comparte'].split(',') if t in TIPOS_GRUPO]
+    return grupo
+
+
+def grupos_de(usuario_id, estado='miembro', tipo=None):
+    """Grupos de un usuario ('miembro': en los que está; 'invitado': invitaciones sin responder; None: ambos).
+
+    Con tipo, solo los que comparten ese tipo de cosas.
+    """
+    filtro, parametros = '', [usuario_id]
+    if estado:
+        filtro += ' AND m.estado = ?'
+        parametros.append(estado)
+    with get_db_connection() as connection:
+        filas = connection.execute(
+            'SELECT g.id, g.nombre, g.comparte, m.estado, m.invitado_por FROM grupos g '
+            f'JOIN grupo_miembros m ON m.grupo_id = g.id WHERE m.usuario_id = ?{filtro} ORDER BY g.nombre COLLATE NOCASE',
+            parametros).fetchall()
+    grupos = [_grupo_a_dict(f) for f in filas]
+    return [g for g in grupos if tipo in g['comparte']] if tipo else grupos
+
+
+def obtener_grupo(grupo_id):
+    with get_db_connection() as connection:
+        fila = connection.execute('SELECT id, nombre, comparte FROM grupos WHERE id = ?', (grupo_id,)).fetchone()
+    return _grupo_a_dict(fila) if fila else None
+
+
+def miembros_de(grupo_id, estado='miembro'):
+    """Usuarios del grupo (con estado None, también los invitados), con su estado en el grupo."""
+    filtro, parametros = '', [grupo_id]
+    if estado:
+        filtro, parametros = ' AND m.estado = ?', [grupo_id, estado]
+    with get_db_connection() as connection:
+        filas = connection.execute(
+            f'SELECT u.id, u.usuario, u.nombre, m.estado FROM grupo_miembros m JOIN usuarios u ON u.id = m.usuario_id '
+            f'WHERE m.grupo_id = ?{filtro} ORDER BY m.estado DESC, u.nombre COLLATE NOCASE', parametros).fetchall()
+    return [dict(f) for f in filas]
+
+
+def es_miembro(grupo_id, usuario_id):
+    with get_db_connection() as connection:
+        return connection.execute(
+            "SELECT 1 FROM grupo_miembros WHERE grupo_id = ? AND usuario_id = ? AND estado = 'miembro'",
+            (grupo_id, usuario_id)).fetchone() is not None
+
+
+def _leer_comparte(comparte):
+    return ','.join(t for t in TIPOS_GRUPO if t in comparte)
+
+
+def crear_grupo(nombre, comparte, usuario_id):
+    with get_db_connection() as connection:
+        cursor = connection.execute('INSERT INTO grupos (nombre, comparte, creado_por) VALUES (?, ?, ?)',
+                                    (nombre.strip(), _leer_comparte(comparte), usuario_id))
+        connection.execute("INSERT INTO grupo_miembros (grupo_id, usuario_id, estado) VALUES (?, ?, 'miembro')",
+                           (cursor.lastrowid, usuario_id))
+        connection.commit()
+    return cursor.lastrowid
+
+
+def cambiar_grupo(grupo_id, nombre, comparte):
+    with get_db_connection() as connection:
+        connection.execute('UPDATE grupos SET nombre = ?, comparte = ? WHERE id = ?',
+                           (nombre.strip(), _leer_comparte(comparte), grupo_id))
+        connection.commit()
+
+
+def invitar_a_grupo(grupo_id, usuario_id, invitado_por):
+    """Devuelve False si ya estaba invitado o dentro."""
+    with get_db_connection() as connection:
+        cursor = connection.execute(
+            "INSERT OR IGNORE INTO grupo_miembros (grupo_id, usuario_id, estado, invitado_por) VALUES (?, ?, 'invitado', ?)",
+            (grupo_id, usuario_id, invitado_por))
+        connection.commit()
+    return cursor.rowcount > 0
+
+
+def aceptar_invitacion(grupo_id, usuario_id):
+    with get_db_connection() as connection:
+        cursor = connection.execute(
+            "UPDATE grupo_miembros SET estado = 'miembro' WHERE grupo_id = ? AND usuario_id = ? AND estado = 'invitado'",
+            (grupo_id, usuario_id))
+        connection.commit()
+    return cursor.rowcount > 0
+
+
+def salir_de_grupo(grupo_id, usuario_id):
+    """Quita a alguien del grupo (o rechaza su invitación). Si ya no queda nadie dentro, el grupo se borra
+    y lo que estaba compartido vuelve a ser solo de quien lo creó."""
+    with get_db_connection() as connection:
+        connection.execute('DELETE FROM grupo_miembros WHERE grupo_id = ? AND usuario_id = ?', (grupo_id, usuario_id))
+        quedan = connection.execute("SELECT COUNT(*) FROM grupo_miembros WHERE grupo_id = ? AND estado = 'miembro'",
+                                    (grupo_id,)).fetchone()[0]
+        if not quedan:
+            for tabla in ('tareas', 'eventos', 'recordatorios'):
+                connection.execute(f'UPDATE {tabla} SET grupo_id = NULL WHERE grupo_id = ?', (grupo_id,))
+            connection.execute('DELETE FROM grupo_miembros WHERE grupo_id = ?', (grupo_id,))
+            connection.execute('DELETE FROM grupos WHERE id = ?', (grupo_id,))
+        connection.commit()
+
+
+def contar_invitaciones(usuario_id):
+    with get_db_connection() as connection:
+        return connection.execute(
+            "SELECT COUNT(*) FROM grupo_miembros WHERE usuario_id = ? AND estado = 'invitado'", (usuario_id,)).fetchone()[0]
+
+
+def comprobar_grupo(tipo, grupo_id, existente=None):
+    """El grupo con el que se quiere compartir algo (o None, solo para quien lo crea). Lanza DatosNoValidos
+    si el usuario actual no está en ese grupo o el grupo no comparte ese tipo de cosas.
+
+    existente: lo que se está modificando (con su grupo_id y usuario_id), si no es nuevo.
+    """
+    grupo_id = int(grupo_id) if str(grupo_id or '').strip().isdigit() else None
+    if existente is not None and grupo_id == existente.get('grupo_id'):
+        return grupo_id  # sin cambios
+    usuario = _usuario.get()
+    if grupo_id is None:
+        # Dejar de compartir algo lo esconde a los demás: solo puede hacerlo quien lo creó
+        dueno = (existente or {}).get('usuario_id')
+        if existente is not None and existente.get('grupo_id') and usuario and dueno not in (None, usuario['id']):
+            raise DatosNoValidos('Solo quien lo creó puede dejar de compartirlo')
+        return None
+    if usuario is None or not es_miembro(grupo_id, usuario['id']):
+        raise DatosNoValidos('No estás en ese grupo')
+    grupo = obtener_grupo(grupo_id)
+    if tipo not in grupo['comparte']:
+        raise DatosNoValidos(f'El grupo «{grupo["nombre"]}» no comparte {TIPOS_GRUPO[tipo].lower()}')
+    return grupo_id

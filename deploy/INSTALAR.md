@@ -241,6 +241,14 @@ suyo. El bot contesta a los usuarios aprobados sin tocar el `.env`. El administr
 apuntados se queda con todos los del `.env` que no sean de otro usuario. Con WhatsApp Cloud API en
 modo de pruebas, Meta solo deja escribir a los números añadidos como destinatarios de prueba.
 
+**Grupos (familias)**: cualquier usuario crea un grupo en su página *Cuenta*, elige qué se puede
+compartir en él (tareas, calendario, recordatorios) e invita a otros por su nombre de usuario; el
+invitado acepta desde su *Cuenta* (le llega un aviso por el bot). Al crear una tarea, un evento o un
+recordatorio en la web se elige *Compartir con*: solo tú o uno de tus grupos. Lo del grupo lo ven y
+lo cambian todos sus miembros (también por el bot), solo quien lo creó puede dejar de compartirlo, y
+los recordatorios del grupo avisan a cada miembro por su chat. Si sale la última persona, el grupo
+se borra y lo compartido vuelve a ser solo de quien lo creó.
+
 **No volver a iniciar sesión**: al entrar, deja marcado *Mantener la sesión iniciada*. La cookie
 de sesión dura `SESION_DIAS` días (90 por defecto) y se renueva con cada visita: mientras uses la
 web al menos una vez en ese plazo, no te la vuelve a pedir. Desde *Cuenta* se cambia la contraseña

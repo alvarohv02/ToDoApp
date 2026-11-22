@@ -30,10 +30,12 @@ sesiones.configurar(app)
 def datos_comunes():
     usuario = g.get('usuario')
     nombre = usuario['nombre'] if usuario else os.getenv('NOMBRE_USUARIO', '').strip()
-    # Al administrador se le avisa de las cuentas nuevas que esperan su aprobación
+    # Aviso junto al nombre: cuentas nuevas por aprobar (administrador) e invitaciones a grupos
     solicitudes = db.contar_pendientes() if usuario and usuario['es_admin'] else 0
+    invitaciones = db.contar_invitaciones(usuario['id']) if usuario else 0
     return {'persona_defecto': db.persona_por_defecto(), 'nombre_usuario': nombre, 'usuario': usuario,
-            'solicitudes': solicitudes}
+            'solicitudes': solicitudes + invitaciones,
+            'ancla_cuenta': '#grupos' if invitaciones else ('#usuarios' if solicitudes else '')}
 
 
 @app.route('/')
@@ -148,6 +150,9 @@ def recordatorio_a_json(recordatorio):
         'estado': recordatorio['estado'],
         'canal': 'Telegram' if recordatorio['destino'].startswith('tg:') else 'WhatsApp',
         'destino': recordatorio['destino'],
+        'grupo_id': recordatorio.get('grupo_id'),
+        # Si es de otro miembro del grupo, el aviso le llega a cada uno por su propio chat
+        'mio': recordatorio['destino'] in usuarios.chats_de(g.get('usuario')),
     }
 
 
@@ -174,7 +179,7 @@ def canales_recordatorio():
 
 
 def leer_recordatorio(payload, destino_actual=None):
-    """Valida lo que manda la web. Devuelve (texto, cuando, destino) o lanza ValueError."""
+    """Valida lo que manda la web. Devuelve (texto, cuando, destino) o lanza DatosNoValidos."""
     texto = (payload.get('texto') or '').strip()
     if not texto:
         raise db.DatosNoValidos('El recordatorio necesita un texto')
@@ -188,6 +193,34 @@ def leer_recordatorio(payload, destino_actual=None):
     if destino != destino_actual and destino not in {c['destino'] for c in canales_recordatorio()}:
         raise db.DatosNoValidos('Elige si quieres el aviso por WhatsApp o por Telegram')
     return texto, cuando, destino
+
+
+def grupo_del_recordatorio(payload, recordatorio=None):
+    """El grupo con el que compartir el recordatorio (comprobado), o el que ya tenía si no se indica."""
+    if 'grupo_id' not in payload:
+        return recordatorio['grupo_id'] if recordatorio else None
+    existente = None
+    if recordatorio is not None:
+        dueno = db.usuario_por_chat(recordatorio['destino'])
+        existente = {'grupo_id': recordatorio['grupo_id'], 'usuario_id': dueno['id'] if dueno else None}
+    return db.comprobar_grupo('recordatorios', payload.get('grupo_id'), existente)
+
+
+def recordatorio_visible(recordatorio):
+    """Los de los chats de quien ha iniciado sesión y los compartidos en sus grupos."""
+    if recordatorio['destino'] in usuarios.chats_de(g.usuario):
+        return True
+    return bool(recordatorio['grupo_id']) and any(
+        grupo['id'] == recordatorio['grupo_id'] for grupo in db.grupos_de(g.usuario['id'], tipo='recordatorios'))
+
+
+@app.route('/api/grupos')
+def grupos_api():
+    """Grupos del usuario y qué comparte cada uno, para elegir con quién compartir algo."""
+    if not g.usuario:
+        return jsonify([])
+    return jsonify([{'id': grupo['id'], 'nombre': grupo['nombre'], 'comparte': grupo['comparte']}
+                    for grupo in db.grupos_de(g.usuario['id'])])
 
 
 @app.route('/api/eventos', methods=['GET', 'POST'])
@@ -257,10 +290,12 @@ def google_sincronizar():
 def recordatorios_api():
     if request.method == 'POST':
         try:
-            texto, cuando, destino = leer_recordatorio(request.get_json(silent=True) or {})
+            payload = request.get_json(silent=True) or {}
+            texto, cuando, destino = leer_recordatorio(payload)
+            grupo = grupo_del_recordatorio(payload)
         except db.DatosNoValidos as error:
             return jsonify({'error': error.mensaje}), 400
-        nuevo = db.crear_recordatorio(destino, texto, cuando)
+        nuevo = db.crear_recordatorio(destino, texto, cuando, grupo)
         return jsonify(recordatorio_a_json(db.obtener_recordatorio(nuevo))), 201
     return jsonify([recordatorio_a_json(r) for r in db.listar_recordatorios(usuarios.chats_de(g.usuario))])
 
@@ -273,8 +308,7 @@ def recordatorios_canales():
 @app.route('/api/recordatorios/<int:recordatorio_id>', methods=['PUT', 'DELETE'])
 def recordatorio_api(recordatorio_id):
     recordatorio = db.obtener_recordatorio(recordatorio_id)
-    # Solo los recordatorios de los chats de quien ha iniciado sesión
-    if recordatorio is not None and recordatorio['destino'] not in usuarios.chats_de(g.usuario):
+    if recordatorio is not None and not recordatorio_visible(recordatorio):
         recordatorio = None
     if recordatorio is None or recordatorio['estado'] == 'cancelado':
         return jsonify({'error': 'Recordatorio no encontrado'}), 404
@@ -284,11 +318,13 @@ def recordatorio_api(recordatorio_id):
         return '', 204
 
     try:
-        texto, cuando, destino = leer_recordatorio(request.get_json(silent=True) or {}, recordatorio['destino'])
+        payload = request.get_json(silent=True) or {}
+        texto, cuando, destino = leer_recordatorio(payload, recordatorio['destino'])
+        grupo = grupo_del_recordatorio(payload, recordatorio)
     except db.DatosNoValidos as error:
         return jsonify({'error': error.mensaje}), 400
 
-    db.editar_recordatorio(recordatorio_id, texto, cuando, destino)
+    db.editar_recordatorio(recordatorio_id, texto, cuando, destino, grupo)
     return jsonify(recordatorio_a_json(db.obtener_recordatorio(recordatorio_id)))
 
 

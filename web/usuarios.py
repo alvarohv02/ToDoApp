@@ -17,11 +17,16 @@ import os
 import re
 import sys
 
+import logging
+import threading
+
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / '.env')
 
 import db
+
+log = logging.getLogger(__name__)
 
 
 def chats_configurados():
@@ -48,6 +53,31 @@ def chats_de(usuario):
         ajenos = db.chats_ajenos(usuario['id'])
         return [c for c in chats_configurados() if c not in ajenos]
     return []
+
+
+def avisar(usuario, texto):
+    """Manda un mensaje a un usuario por el bot, en segundo plano (si falla, no pasa nada).
+
+    Telegram primero: WhatsApp solo deja escribir si esa persona ha hablado al bot en las últimas 24 h.
+    """
+    if usuario is None:
+        return
+
+    def enviar():
+        import telegram_bot
+        import whatsapp
+
+        for chat in sorted(chats_de(usuario), key=lambda c: not c.startswith('tg:')):
+            try:
+                if chat.startswith('tg:'):
+                    telegram_bot.enviar_mensaje(chat[3:], texto)
+                    return
+                if whatsapp.enviar_mensaje(chat, texto):
+                    return
+            except Exception as error:  # noqa: BLE001 - el aviso es opcional
+                log.warning('No se pudo avisar a %s por el bot: %s', usuario['usuario'], error)
+
+    threading.Thread(target=enviar, daemon=True).start()
 
 
 def chats_en_uso(excepto_id=None):

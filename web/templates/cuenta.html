@@ -78,6 +78,80 @@
         {% endif %}
     </section>
 
+    <section class="card cuenta-card" id="grupos">
+        <h2 class="card-title">Grupos</h2>
+        <p class="card-text">Comparte tareas, calendario o recordatorios con tu familia o con quien quieras. Al crear algo
+            eliges si es solo tuyo o de un grupo; lo del grupo lo ven y lo pueden cambiar todos sus miembros, y los
+            recordatorios del grupo avisan a todos.</p>
+
+        {% for invitacion in invitaciones %}
+        <div class="grupo-invitacion">
+            <p><strong>{{ invitacion.de or 'Alguien' }}</strong> te ha invitado a <strong>{{ invitacion.nombre }}</strong>
+                <small>({{ invitacion.miembros|map(attribute='nombre')|join(', ') }})</small></p>
+            <div class="cuenta-usuario-botones">
+                <form method="post"><input type="hidden" name="accion" value="grupo_aceptar"><input type="hidden" name="grupo" value="{{ invitacion.id }}">
+                    <button type="submit" class="btn btn-primary">Aceptar</button></form>
+                <form method="post"><input type="hidden" name="accion" value="grupo_rechazar"><input type="hidden" name="grupo" value="{{ invitacion.id }}">
+                    <button type="submit" class="btn btn-ghost">Rechazar</button></form>
+            </div>
+        </div>
+        {% endfor %}
+
+        {% for grupo in grupos %}
+        <details class="grupo" {% if loop.length == 1 %}open{% endif %}>
+            <summary>
+                <span class="grupo-nombre">👨‍👩‍👧 {{ grupo.nombre }}</span>
+                <small>{{ grupo.miembros|selectattr('estado', 'equalto', 'miembro')|list|length }} miembros ·
+                    {% for tipo in grupo.comparte %}{{ tipos_grupo[tipo] }}{{ ', ' if not loop.last }}{% else %}no comparte nada{% endfor %}</small>
+            </summary>
+            <ul class="grupo-miembros">
+                {% for miembro in grupo.miembros %}
+                <li>
+                    <span>{{ miembro.nombre }}{% if miembro.id == usuario.id %} (tú){% endif %}{% if miembro.estado == 'invitado' %} <small>· invitación pendiente</small>{% endif %}</span>
+                    {% if miembro.estado == 'invitado' %}
+                    <form method="post"><input type="hidden" name="accion" value="grupo_quitar_invitacion"><input type="hidden" name="grupo" value="{{ grupo.id }}">
+                        <input type="hidden" name="usuario_id" value="{{ miembro.id }}"><button type="submit" class="enlace-boton">Retirar</button></form>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            <form method="post" class="grupo-fila">
+                <input type="hidden" name="accion" value="grupo_invitar"><input type="hidden" name="grupo" value="{{ grupo.id }}">
+                <input class="input" name="invitado" required placeholder="Usuario a invitar" autocapitalize="none" autocorrect="off" spellcheck="false">
+                <button type="submit" class="btn btn-ghost">Invitar</button>
+            </form>
+            <form method="post" class="cuenta-form">
+                <input type="hidden" name="accion" value="grupo_guardar"><input type="hidden" name="grupo" value="{{ grupo.id }}">
+                <label class="field"><span>Nombre</span><input class="input" name="nombre" value="{{ grupo.nombre }}" required maxlength="40"></label>
+                <fieldset class="grupo-comparte"><legend>Qué se puede compartir en este grupo</legend>
+                    {% for tipo, texto in tipos_grupo.items() %}
+                    <label><input type="checkbox" name="comparte_{{ tipo }}" value="1" {% if tipo in grupo.comparte %}checked{% endif %}> {{ texto }}</label>
+                    {% endfor %}
+                </fieldset>
+                <div><button type="submit" class="btn btn-primary">Guardar</button></div>
+            </form>
+            <form method="post" onsubmit="return confirm('¿Salir de {{ grupo.nombre|e }}? Lo que hayas compartido seguirá en el grupo.')">
+                <input type="hidden" name="accion" value="grupo_salir"><input type="hidden" name="grupo" value="{{ grupo.id }}">
+                <button type="submit" class="btn btn-danger">Salir del grupo</button>
+            </form>
+        </details>
+        {% endfor %}
+
+        <details class="grupo" {% if not grupos and not invitaciones %}open{% endif %}>
+            <summary><span class="grupo-nombre">+ Crear un grupo</span></summary>
+            <form method="post" class="cuenta-form">
+                <input type="hidden" name="accion" value="grupo_crear">
+                <label class="field"><span>Nombre</span><input class="input" name="nombre" required maxlength="40" placeholder="Familia"></label>
+                <fieldset class="grupo-comparte"><legend>Qué se puede compartir</legend>
+                    {% for tipo, texto in tipos_grupo.items() %}
+                    <label><input type="checkbox" name="comparte_{{ tipo }}" value="1" checked> {{ texto }}</label>
+                    {% endfor %}
+                </fieldset>
+                <div><button type="submit" class="btn btn-primary">Crear grupo</button></div>
+            </form>
+        </details>
+    </section>
+
     {% if usuario.es_admin %}
     <section class="card cuenta-card" id="usuarios">
         <h2 class="card-title">Usuarios</h2>

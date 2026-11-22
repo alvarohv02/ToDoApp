@@ -72,7 +72,7 @@
                 <div class="sidebar-footer">
                     {% if usuario %}
                     <div class="sidebar-usuario">
-                        <a class="sidebar-usuario-nombre" href="/cuenta{{ '#usuarios' if solicitudes }}" title="Tu cuenta">👤 {{ usuario.nombre }}{% if solicitudes %} <span class="insignia" title="Solicitudes de registro">{{ solicitudes }}</span>{% endif %}</a>
+                        <a class="sidebar-usuario-nombre" href="/cuenta{{ ancla_cuenta }}" title="Tu cuenta">👤 {{ usuario.nombre }}{% if solicitudes %} <span class="insignia" title="Pendiente de revisar">{{ solicitudes }}</span>{% endif %}</a>
                         <form method="post" action="/logout">
                             <button type="submit" class="sidebar-salir" title="Cerrar sesión">Salir</button>
                         </form>

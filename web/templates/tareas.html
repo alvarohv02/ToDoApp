@@ -75,6 +75,13 @@
             <span>Persona</span>
             <input class="input" v-model="nuevaTarea.persona" :placeholder="personaDefecto">
         </label>
+        <label class="field" v-if="gruposParaTareas().length">
+            <span>Compartir con</span>
+            <select class="input" v-model="nuevaTarea.grupo_id">
+                <option :value="null">Solo yo</option>
+                <option v-for="grupo in gruposParaTareas()" :key="grupo.id" :value="grupo.id" v-text="'👨‍👩‍👧 ' + grupo.nombre"></option>
+            </select>
+        </label>
         <div class="form-actions">
             <button type="submit" class="btn btn-primary">Añadir tarea</button>
         </div>
@@ -104,6 +111,7 @@
                         <span v-if="tarea.fecha_limite" class="task-date"
                               v-text="'📅 ' + formatearFecha(tarea.fecha_limite) + (tarea.hora_limite ? ' · ' + tarea.hora_limite : '')"></span>
                         <span v-if="!esPersonaDefecto(tarea.persona)" class="task-meta" v-text="'👤 ' + tarea.persona"></span>
+                        <span v-if="tarea.grupo_id" class="etiqueta-grupo" title="Compartida con el grupo" v-text="'👨‍👩‍👧 ' + nombreGrupo(tarea.grupo_id)"></span>
                     </div>
                 </div>
                 <div class="task-actions">
@@ -146,7 +154,10 @@
             </thead>
             <tbody>
                 <tr v-for="(tarea, i) in tareasOrdenadas" :key="tarea.id || tarea.nombre || i">
-                    <td class="cell-title" v-text="tarea.nombre"></td>
+                    <td class="cell-title">
+                        <span v-text="tarea.nombre"></span>
+                        <span v-if="tarea.grupo_id" class="etiqueta-grupo" title="Compartida con el grupo" v-text="'👨‍👩‍👧 ' + nombreGrupo(tarea.grupo_id)"></span>
+                    </td>
                     <td><span class="pill" :class="'imp-' + (tarea.importancia || '').toLowerCase()" v-text="tarea.importancia"></span></td>
                     <td><span class="pill" :class="'status-' + tarea.status.toLowerCase().replace(/\s+/g, '-')" v-text="tarea.status"></span></td>
                     <td class="cell-muted" data-col="Creada" v-text="tarea.fecha"></td>
@@ -208,6 +219,13 @@
             <label class="field">
                 <span>Persona encargada</span>
                 <input class="input" type="text" v-model="tareaEditando.persona">
+            </label>
+            <label class="field" v-if="gruposParaTareas(tareaEditando.grupo_id).length">
+                <span>Compartir con</span>
+                <select class="input" v-model="tareaEditando.grupo_id">
+                    <option :value="null">Solo yo</option>
+                    <option v-for="grupo in gruposParaTareas(tareaEditando.grupo_id)" :key="grupo.id" :value="grupo.id" v-text="'👨‍👩‍👧 ' + grupo.nombre"></option>
+                </select>
             </label>
             <div class="modal-actions">
                 <button type="button" class="btn btn-ghost" @click="cerrarModal">Cancelar</button>

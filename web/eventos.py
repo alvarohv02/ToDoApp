@@ -22,8 +22,11 @@ def _hora(valor, campo):
     return valor
 
 
-def validar(datos):
-    """Normaliza los datos de un evento o lanza ValueError con un mensaje para el usuario."""
+def validar(datos, existente=None):
+    """Normaliza los datos de un evento o lanza DatosNoValidos con un mensaje para el usuario.
+
+    existente: el evento que se modifica (para comprobar si se puede cambiar con quién se comparte).
+    """
     titulo = (datos.get('titulo') or '').strip()
     if not titulo:
         raise DatosNoValidos('El evento necesita un título')
@@ -57,8 +60,13 @@ def validar(datos):
         if fin < fecha:
             raise DatosNoValidos('La fecha de fin de la repetición es anterior al inicio')
 
-    return {'titulo': titulo, 'categoria': categoria, 'fecha': fecha.isoformat(), 'hora_inicio': hora_inicio,
-            'hora_fin': hora_fin, 'repeticion': repeticion, 'hasta': hasta}
+    resultado = {'titulo': titulo, 'categoria': categoria, 'fecha': fecha.isoformat(), 'hora_inicio': hora_inicio,
+                 'hora_fin': hora_fin, 'repeticion': repeticion, 'hasta': hasta}
+    if 'grupo_id' in datos:
+        resultado['grupo_id'] = db.comprobar_grupo('eventos', datos.get('grupo_id'), existente)
+    elif existente is not None:
+        resultado['grupo_id'] = existente.get('grupo_id')  # las partes de una serie siguen en su grupo
+    return resultado
 
 
 def _mismo_dia_en(anio, fecha):
@@ -182,17 +190,17 @@ def modificar(evento, datos, alcance='serie', dia=None):
     'siguientes': la serie termina el día anterior y empieza una nueva desde ese día con los cambios.
     """
     if alcance == 'serie' or not evento['repeticion']:
-        return db.guardar_evento(validar(datos), evento['id'])
+        return db.guardar_evento(validar(datos, evento), evento['id'])
     if dia is None or not ocurre_el(evento, dia):
         raise DatosNoValidos('Ese día no hay ninguna repetición de este evento')
     if alcance == 'uno':
-        nuevo = validar(dict(datos, repeticion='', hasta=''))
+        nuevo = validar(dict(datos, repeticion='', hasta=''), evento)
         db.anadir_excepcion(evento['id'], dia)
         return db.guardar_evento(nuevo)
     if alcance == 'siguientes':
         if evento['repeticion'] not in CON_FIN:
             raise DatosNoValidos('«Este y los siguientes» no vale para los que se repiten cada año')
-        nuevo = validar(dict(datos, fecha=datos.get('fecha') or dia.isoformat()))
+        nuevo = validar(dict(datos, fecha=datos.get('fecha') or dia.isoformat()), evento)
         borrar(evento, 'siguientes', dia)
         return db.guardar_evento(nuevo)
     raise DatosNoValidos('Alcance no válido')

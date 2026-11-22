@@ -302,25 +302,9 @@ def _leer_chats_del_formulario(formulario, usuario_id=None):
 
 def _avisar_al_admin(texto):
     """Manda un mensaje al administrador por el bot (en segundo plano: si falla, no pasa nada)."""
-    def enviar():
-        import telegram_bot
-        import usuarios
-        import whatsapp
+    import usuarios
 
-        admin = db.obtener_usuario(db.id_admin_principal())
-        chats = usuarios.chats_de(admin)
-        # Telegram primero: WhatsApp solo deja escribir si le has hablado al bot en las últimas 24 h
-        for chat in sorted(chats, key=lambda c: not c.startswith('tg:')):
-            try:
-                if chat.startswith('tg:'):
-                    telegram_bot.enviar_mensaje(chat[3:], texto)
-                    return
-                if whatsapp.enviar_mensaje(chat, texto):
-                    return
-            except Exception as error:  # noqa: BLE001 - el aviso es opcional
-                log.warning('No se pudo avisar al administrador de un registro: %s', error)
-
-    threading.Thread(target=enviar, daemon=True).start()
+    usuarios.avisar(db.obtener_usuario(db.id_admin_principal()), texto)
 
 
 @sesiones_bp.route('/registro', methods=['GET', 'POST'])
@@ -382,7 +366,9 @@ def _accion_de_admin(accion, usuario_id):
 
 @sesiones_bp.route('/cuenta', methods=['GET', 'POST'])
 def cuenta():
-    import usuarios  # aquí para evitar una importación circular al arrancar
+    # aquí para evitar una importación circular al arrancar
+    import grupos
+    import usuarios
 
     usuario = g.usuario
     mensaje = error = None
@@ -412,6 +398,8 @@ def cuenta():
                 mensaje = 'Chats del bot guardados.'
         elif accion in ('aprobar', 'rechazar', 'eliminar') and usuario['es_admin']:
             mensaje, error = _accion_de_admin(accion, request.form.get('id') or '')
+        elif (accion or '').startswith('grupo_'):
+            mensaje, error = grupos.accion(usuario, request.form)
         else:
             error = 'Acción no válida'
 
@@ -423,4 +411,5 @@ def cuenta():
         telegram=next((c[3:] for c in chats if c.startswith('tg:')), ''),
         pendientes=[u for u in otros if u['estado'] == 'pendiente'],
         activos=[u for u in otros if u['estado'] == 'activo'],
+        **grupos.datos(usuario),
     ), (400 if error else 200)

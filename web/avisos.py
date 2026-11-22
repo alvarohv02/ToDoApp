@@ -9,6 +9,7 @@ import requests
 
 import db
 import telegram_bot
+import usuarios
 import whatsapp
 
 log = logging.getLogger(__name__)
@@ -58,8 +59,37 @@ def _enviar_whatsapp(telefono, recordatorio, texto):
 
 
 def _enviar(recordatorio, ahora):
-    destino = recordatorio['destino']
     texto = _texto_aviso(recordatorio, ahora)
+    grupo = db.obtener_grupo(recordatorio['grupo_id']) if recordatorio.get('grupo_id') else None
+    if grupo and 'recordatorios' in grupo['comparte']:
+        texto += f'\n_👨‍👩‍👧 {grupo["nombre"]}_'
+        # Al resto del grupo solo en el primer intento: si falla el envío principal y se reintenta,
+        # los demás no lo reciben repetido
+        if not recordatorio.get('intentos'):
+            _avisar_al_grupo(grupo, recordatorio, texto)
+    return _enviar_a(recordatorio['destino'], recordatorio, texto)
+
+
+def _avisar_al_grupo(grupo, recordatorio, texto):
+    """Manda el recordatorio a los demás miembros del grupo, a cada uno por su chat (Telegram si lo tiene)."""
+    dueno = db.usuario_por_chat(recordatorio['destino'])
+    ya_avisados = {recordatorio['destino']}
+    for miembro in db.miembros_de(grupo['id']):
+        if dueno and miembro['id'] == dueno['id']:
+            continue
+        chats = usuarios.chats_de(db.obtener_usuario(miembro['id']))
+        chat = next((c for c in chats if c.startswith('tg:')), chats[0] if chats else None)
+        if not chat or chat in ya_avisados:
+            continue
+        ya_avisados.add(chat)
+        try:
+            if not _enviar_a(chat, recordatorio, texto):
+                log.warning('Recordatorio %s sin entregar a un miembro del grupo', recordatorio['id'])
+        except (requests.RequestException, RuntimeError) as error:
+            log.warning('Error enviando el recordatorio %s a un miembro del grupo: %s', recordatorio['id'], error)
+
+
+def _enviar_a(destino, recordatorio, texto):
     if destino.startswith('tg:'):
         telegram_bot.enviar_mensaje(int(destino[3:]), texto)
         return True

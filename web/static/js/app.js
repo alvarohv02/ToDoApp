@@ -6,6 +6,49 @@ function esPersonaDefecto(persona) {
   return !persona || persona === 'Sin asignar' || persona === PERSONA_DEFECTO;
 }
 
+// --- Grupos (familias) ---------------------------------------------------------------------
+// Al crear una tarea, un evento o un recordatorio se puede compartir con un grupo del usuario.
+let promesaGrupos = null;
+let gruposConocidos = [];
+
+function cargarGrupos() {
+  promesaGrupos = promesaGrupos || fetch('/api/grupos')
+    .then((respuesta) => (respuesta.ok ? respuesta.json() : []))
+    .catch(() => [])
+    .then((grupos) => {
+      gruposConocidos = Array.isArray(grupos) ? grupos : [];
+      return gruposConocidos;
+    });
+  return promesaGrupos;
+}
+
+function nombreGrupo(grupoId) {
+  const grupo = gruposConocidos.find((g) => g.id === grupoId);
+  return grupo ? grupo.nombre : 'Grupo';
+}
+
+// <select> "Compartir con": "Solo yo" y los grupos que comparten ese tipo de cosas.
+// Si el elemento ya es de un grupo que no aparece (el grupo dejó de compartirlo), se mantiene.
+function rellenarSelectorGrupo(select, tipo, grupoActual) {
+  const grupos = gruposConocidos.filter((g) => g.comparte.includes(tipo));
+  select.innerHTML = '';
+  select.appendChild(new Option('Solo yo', ''));
+  grupos.forEach((grupo) => select.appendChild(new Option(`👨‍👩‍👧 ${grupo.nombre}`, String(grupo.id))));
+  if (grupoActual && !grupos.some((g) => g.id === grupoActual)) {
+    select.appendChild(new Option(`👨‍👩‍👧 ${nombreGrupo(grupoActual)}`, String(grupoActual)));
+  }
+  select.value = grupoActual ? String(grupoActual) : '';
+  return grupos.length > 0 || Boolean(grupoActual);
+}
+
+function etiquetaGrupo(grupoId) {
+  const etiqueta = document.createElement('span');
+  etiqueta.className = 'etiqueta-grupo';
+  etiqueta.textContent = `👨‍👩‍👧 ${nombreGrupo(grupoId)}`;
+  etiqueta.title = 'Compartido con el grupo';
+  return etiqueta;
+}
+
 function obtenerIdTarea() {
   if (window.crypto && typeof window.crypto.randomUUID === 'function') {
     return window.crypto.randomUUID();
@@ -23,7 +66,8 @@ function normalizarTarea(tarea) {
     hora_limite: tarea.hora_limite || '',
     status: tarea.status || 'Sin Empezar',
     fecha: tarea.fecha || new Date().toLocaleDateString(),
-    persona: tarea.persona || PERSONA_DEFECTO
+    persona: tarea.persona || PERSONA_DEFECTO,
+    grupo_id: tarea.grupo_id || null
   };
 }
 
@@ -162,7 +206,8 @@ function crearEtiquetaEvento(evento, alPulsar) {
   const repeticion = {
     diaria: 'Se repite cada día', semanal: 'Se repite cada semana', mensual: 'Se repite cada mes', anual: 'Se repite cada año',
   }[evento.repeticion];
-  const detalle = [`${EMOJI_CATEGORIA[evento.categoria] || '📌'} ${evento.categoria}: ${evento.titulo}`, horarioEvento(evento), repeticion, 'Pulsa para editar']
+  const detalle = [`${EMOJI_CATEGORIA[evento.categoria] || '📌'} ${evento.categoria}: ${evento.titulo}`, horarioEvento(evento), repeticion,
+    evento.grupo_id ? `👨‍👩‍👧 Compartido con ${nombreGrupo(evento.grupo_id)}` : '', 'Pulsa para editar']
     .filter(Boolean).join('\n');
   const article = crearChip(`calendar-event categoria-${CLASE_CATEGORIA[evento.categoria] || 'otro'}`,
     evento.hora_inicio, evento.titulo, detalle);
@@ -205,6 +250,7 @@ async function renderizarCalendario() {
   const opcionSiguientes = calendarRoot.querySelector('[data-alcance-siguientes]');
   const campoRepeticion = form.elements.repeticion.closest('.field');
   const camposHora = [...calendarRoot.querySelectorAll('[data-event-hora]')];
+  const campoGrupo = calendarRoot.querySelector('[data-event-grupo]');
   let eventoEditando = null;
   // Día pulsado de un evento que se repite (null si no se repite o es nuevo)
   let ocurrencia = null;
@@ -214,7 +260,8 @@ async function renderizarCalendario() {
     const month = state.fechaVista.getMonth();
     const [tareas, eventos] = await Promise.all([
       cargarTareas(),
-      cargarEventos(claveFecha(new Date(year, month, 1)), claveFecha(new Date(year, month + 1, 0)))
+      cargarEventos(claveFecha(new Date(year, month, 1)), claveFecha(new Date(year, month + 1, 0))),
+      cargarGrupos()  // antes de pintar, para poner el nombre del grupo en lo compartido
     ]);
     state.tareas = tareas;
     state.eventos = eventos;
@@ -292,6 +339,7 @@ async function renderizarCalendario() {
     actualizarTodoDia();
     form.elements.repeticion.value = datos.repeticion || '';
     form.elements.hasta.value = datos.hasta || '';
+    campoGrupo.hidden = !rellenarSelectorGrupo(form.elements.grupo_id, 'eventos', datos.grupo_id || null);
     aplicarAlcance();
 
     panel.hidden = false;
@@ -333,6 +381,9 @@ async function renderizarCalendario() {
     envio.preventDefault();
     const datos = Object.fromEntries(new FormData(form).entries());
     delete datos.todo_dia;
+    if (campoGrupo.hidden) {
+      delete datos.grupo_id;  // sin grupos que compartan el calendario: no se toca con quién se comparte
+    }
     if (form.elements.todo_dia.checked) {
       datos.hora_inicio = '';
       datos.hora_fin = '';
@@ -695,6 +746,9 @@ async function renderizarCalendario() {
         row.addEventListener('click', () => abrirFormulario(evento));
         name.textContent = `${EMOJI_CATEGORIA[evento.categoria] || '📌'} ${evento.titulo}`;
         meta.textContent = `${formatearFecha(evento.fecha)} · ${horarioEvento(evento)}`;
+        if (evento.grupo_id) {
+          meta.append(' ', etiquetaGrupo(evento.grupo_id));
+        }
         chip.className = `agenda-status categoria-chip categoria-${CLASE_CATEGORIA[evento.categoria] || 'otro'}`;
         chip.textContent = evento.categoria;
       } else {
@@ -886,7 +940,8 @@ function renderizarVistaTareas() {
         mostrarModal: false,
         tareaEditando: null,
         indiceEditando: null,
-        nuevaTarea: { nombre: '', importancia: '', fecha_limite: '', hora_limite: '', persona: '' },
+        nuevaTarea: { nombre: '', importancia: '', fecha_limite: '', hora_limite: '', persona: '', grupo_id: null },
+        grupos: [],
         tareas: [],
         cargando: true,
         errorCarga: '',
@@ -907,12 +962,23 @@ function renderizarVistaTareas() {
     },
 
     async mounted() {
-      await this.recargarTareas();
+      const [grupos] = await Promise.all([cargarGrupos(), this.recargarTareas()]);
+      this.grupos = grupos;
     },
 
     methods: {
       formatearFecha,
       esPersonaDefecto,
+      nombreGrupo,
+
+      // Grupos con los que se pueden compartir tareas (y el de la tarea, aunque ya no comparta tareas)
+      gruposParaTareas(grupoActual = null) {
+        const grupos = this.grupos.filter((g) => g.comparte.includes('tareas'));
+        if (grupoActual && !grupos.some((g) => g.id === grupoActual)) {
+          grupos.push({ id: grupoActual, nombre: nombreGrupo(grupoActual) });
+        }
+        return grupos;
+      },
 
       // Cada clic en una cabecera: ascendente -> descendente -> sin ordenar
       ordenarPor(campo) {
@@ -982,6 +1048,8 @@ function renderizarVistaTareas() {
             if (indice !== -1) {
               this.tareas.splice(indice, 1, tareaGuardada);
             }
+          } catch (error) {
+            this.errorCarga = error.message;
           } finally {
             this.cerrarModal();
           }
@@ -1055,11 +1123,12 @@ function renderizarVistaTareas() {
             hora_limite: this.nuevaTarea.fecha_limite ? this.nuevaTarea.hora_limite : '',
             status: 'Sin Empezar',
             fecha: new Date().toLocaleDateString(),
-            persona: this.nuevaTarea.persona || PERSONA_DEFECTO
+            persona: this.nuevaTarea.persona || PERSONA_DEFECTO,
+            grupo_id: this.nuevaTarea.grupo_id
           });
 
           this.tareas.push(tareaCreada);
-          this.nuevaTarea = { nombre: '', importancia: '', fecha_limite: '', hora_limite: '', persona: '' };
+          this.nuevaTarea = { nombre: '', importancia: '', fecha_limite: '', hora_limite: '', persona: '', grupo_id: null };
           this.mostrarFormulario = false;
         } catch (error) {
           this.errorCarga = error.message;
@@ -1152,6 +1221,9 @@ function crearTarjetaRecordatorio(recordatorio, alCambiar, canales = []) {
   const meta = crearElemento('div', 'reminder-meta');
   const etiquetasEstado = { pendiente: 'Pendiente', enviado: 'Enviado', error: 'No se pudo enviar' };
   meta.append(crearElemento('span', `reminder-chip estado-${recordatorio.estado}`, etiquetasEstado[recordatorio.estado]));
+  if (recordatorio.grupo_id) {
+    meta.append(etiquetaGrupo(recordatorio.grupo_id));  // avisa a todos los miembros del grupo
+  }
   columnaTexto.append(inputTexto, meta);
 
   const selectCanal = crearElemento('select', 'input reminder-canal');
@@ -1332,7 +1404,8 @@ function iniciarFormularioRecordatorio(raiz, canales, alCrear) {
         body: JSON.stringify({
           texto: form.elements.texto.value.trim(),
           cuando: `${form.elements.dia.value}T${form.elements.hora.value}`,
-          destino: elegido ? elegido.value : ''
+          destino: elegido ? elegido.value : '',
+          ...(form.elements.grupo_id.closest('[data-reminder-grupo]').hidden ? {} : { grupo_id: form.elements.grupo_id.value })
         })
       });
       try {
@@ -1363,7 +1436,12 @@ async function renderizarRecordatorios() {
   const listaHechos = raiz.querySelector('[data-reminders-done-list]');
   const contador = raiz.querySelector('[data-reminders-pending]');
   const proximo = raiz.querySelector('[data-reminders-next]');
-  const canales = await peticionRecordatorio(`${API_REMINDERS_URL}/canales`).catch(() => []);
+  const [canales] = await Promise.all([
+    peticionRecordatorio(`${API_REMINDERS_URL}/canales`).catch(() => []),
+    cargarGrupos()
+  ]);
+  const campoGrupo = raiz.querySelector('[data-reminder-grupo]');
+  campoGrupo.hidden = !rellenarSelectorGrupo(campoGrupo.querySelector('select'), 'recordatorios', null);
   iniciarFormularioRecordatorio(raiz, canales, () => recargar());
 
   async function recargar() {

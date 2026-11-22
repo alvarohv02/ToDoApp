@@ -10,7 +10,7 @@
         </div>
         <div class="page-actions">
             <a class="btn btn-primary" href="#resumen-del-dia" data-ir-resumen>✨ Resumen del día</a>
-            {% if usuario %}<a class="btn btn-ghost solo-movil" href="/cuenta{{ '#usuarios' if solicitudes }}" title="Tu cuenta y cerrar sesión">👤 {{ usuario.nombre }}{% if solicitudes %} <span class="insignia" title="Solicitudes de registro">{{ solicitudes }}</span>{% endif %}</a>{% endif %}
+            {% if usuario %}<a class="btn btn-ghost solo-movil" href="/cuenta{{ ancla_cuenta }}" title="Tu cuenta y cerrar sesión">👤 {{ usuario.nombre }}{% if solicitudes %} <span class="insignia" title="Pendiente de revisar">{{ solicitudes }}</span>{% endif %}</a>{% endif %}
         </div>
     </header>
 
