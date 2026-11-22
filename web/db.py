@@ -152,8 +152,10 @@ def init_db():
             '''
         )
 
-        # Carpetas de tareas ("Universidad", "Casa"...): cada usuario tiene las suyas y coloca en ellas
-        # sus tareas, también las compartidas en un grupo (cada miembro las ordena a su manera)
+        # Carpetas de tareas ("Universidad", "Casa"...). Una carpeta es solo de quien la crea o de un grupo:
+        # - personal: cada usuario coloca en ella sus tareas (tarea_carpetas, una fila por usuario), también
+        #   las compartidas en un grupo, y cada miembro las ordena a su manera;
+        # - de grupo (grupo_id): la ven todos sus miembros y sus tareas son del grupo (tareas.carpeta_compartida)
         connection.execute(
             '''
             CREATE TABLE IF NOT EXISTS carpetas (
@@ -164,8 +166,16 @@ def init_db():
             )
             '''
         )
-        connection.execute(
-            'CREATE UNIQUE INDEX IF NOT EXISTS idx_carpetas_nombre ON carpetas (usuario_id, nombre COLLATE NOCASE)')
+        columnas = {fila['name'] for fila in connection.execute('PRAGMA table_info(carpetas)')}
+        if 'grupo_id' not in columnas:
+            connection.execute('ALTER TABLE carpetas ADD COLUMN grupo_id INTEGER')
+        # Con carpetas de grupo, el nombre no se repite dentro de cada sitio (lo comprueba _nombre_carpeta)
+        connection.execute('DROP INDEX IF EXISTS idx_carpetas_nombre')
+        columnas = {fila['name'] for fila in connection.execute('PRAGMA table_info(tareas)')}
+        if 'carpeta_compartida' not in columnas:
+            connection.execute('ALTER TABLE tareas ADD COLUMN carpeta_compartida INTEGER')
+        connection.execute('UPDATE tareas SET carpeta_compartida = NULL WHERE carpeta_compartida IS NOT NULL AND '
+                           'carpeta_compartida NOT IN (SELECT id FROM carpetas WHERE grupo_id IS NOT NULL)')
         connection.execute(
             '''
             CREATE TABLE IF NOT EXISTS tarea_carpetas (
@@ -268,13 +278,16 @@ def row_to_task(row):
         'persona': row['persona'],
         'grupo_id': row['grupo_id'],
         'usuario_id': row['usuario_id'],
+        # Carpeta en la que la ve el usuario actual: la del grupo si está en una, si no la suya personal
         'carpeta_id': row['carpeta_id'] if 'carpeta_id' in row.keys() else None,
     }
 
 
 # Columnas de una tarea, con la carpeta en la que la tiene el usuario actual (parámetro: _id_carpetas())
 _COLUMNAS_TAREA = '''id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona, grupo_id, usuario_id,
-    (SELECT tc.carpeta_id FROM tarea_carpetas tc WHERE tc.tarea_id = tareas.id AND tc.usuario_id = ?) AS carpeta_id'''
+    COALESCE(carpeta_compartida,
+             (SELECT tc.carpeta_id FROM tarea_carpetas tc WHERE tc.tarea_id = tareas.id AND tc.usuario_id = ?))
+        AS carpeta_id'''
 
 
 def fetch_all_tasks():
@@ -354,10 +367,17 @@ def build_task_payload(data, existing=None):
     if not importancia:
         raise DatosNoValidos('La importancia de la tarea es obligatoria')
 
+    carpeta_id = existing.get('carpeta_id')
     if 'carpeta_id' in data:
-        carpeta_id = comprobar_carpeta(data.get('carpeta_id'))
-    else:
-        carpeta_id = existing.get('carpeta_id')
+        carpeta = comprobar_carpeta(data.get('carpeta_id'))
+        carpeta_id = carpeta['id'] if carpeta else None
+        if carpeta and carpeta['grupo_id']:
+            # Lo que está en una carpeta de grupo es de ese grupo
+            grupo_id = comprobar_grupo('tareas', carpeta['grupo_id'], existing or None)
+    elif carpeta_id and grupo_id != existing.get('grupo_id'):
+        carpeta = obtener_carpeta(carpeta_id)
+        if carpeta and carpeta['grupo_id'] and carpeta['grupo_id'] != grupo_id:
+            carpeta_id = None  # ha dejado de ser de ese grupo: sale de su carpeta
 
     if hora_limite:
         try:
@@ -391,7 +411,7 @@ def insert_task(data):
             ''',
             (*(task[campo] for campo in CAMPOS), id_dueno(), task['grupo_id']),
         )
-        _poner_en_carpeta(connection, task['id'], task['carpeta_id'])
+        _poner_en_carpeta(connection, task['id'], task['carpeta_id'], task['grupo_id'])
         connection.commit()
 
     _anotar({'accion': 'borrar', 'tabla': 'tareas', 'id': task['id']})
@@ -430,7 +450,7 @@ def update_task(task_id, data):
             ),
         )
         if task['carpeta_id'] != existing.get('carpeta_id'):
-            _poner_en_carpeta(connection, task_id, task['carpeta_id'])
+            _poner_en_carpeta(connection, task_id, task['carpeta_id'], task['grupo_id'])
         connection.commit()
 
     return fetch_task(task_id)
@@ -451,7 +471,9 @@ def delete_task(task_id):
 
 
 # --- Carpetas de tareas ---------------------------------------------------------------
-# Cada usuario tiene sus carpetas. Una tarea está como mucho en una carpeta de cada usuario.
+# Una carpeta es solo de quien la crea o de un grupo. En las personales cada usuario coloca sus tareas
+# (una tarea está como mucho en una carpeta de cada usuario). Lo que está en una carpeta de grupo es del
+# grupo: la carpeta y sus tareas las ven y las cambian todos sus miembros.
 
 MAX_CARPETAS = 50
 
@@ -461,79 +483,159 @@ def _id_carpetas():
     return id_dueno() or 0
 
 
+def _carpetas_visibles():
+    """(condición, parámetros): las carpetas personales del usuario y las de sus grupos que comparten tareas."""
+    grupos, de_grupos = _de_mis_grupos('tareas', id_dueno())
+    return f'((usuario_id = ? AND grupo_id IS NULL) OR {grupos})', [_id_carpetas(), *de_grupos]
+
+
+def _carpeta_a_dict(fila):
+    carpeta = dict(fila)
+    carpeta['mia'] = carpeta.pop('usuario_id') == _id_carpetas()  # la ha creado el usuario actual
+    return carpeta
+
+
 def listar_carpetas():
+    condicion, parametros = _carpetas_visibles()
     with get_db_connection() as connection:
-        filas = connection.execute('SELECT id, nombre FROM carpetas WHERE usuario_id = ? ORDER BY nombre COLLATE NOCASE',
-                                   (_id_carpetas(),)).fetchall()
-    return [dict(f) for f in filas]
+        filas = connection.execute(
+            f'SELECT id, nombre, grupo_id, usuario_id FROM carpetas WHERE {condicion} ORDER BY nombre COLLATE NOCASE',
+            parametros).fetchall()
+    return [_carpeta_a_dict(f) for f in filas]
 
 
 def obtener_carpeta(carpeta_id):
+    condicion, parametros = _carpetas_visibles()
     with get_db_connection() as connection:
-        fila = connection.execute('SELECT id, nombre FROM carpetas WHERE id = ? AND usuario_id = ?',
-                                  (carpeta_id, _id_carpetas())).fetchone()
-    return dict(fila) if fila else None
+        fila = connection.execute(f'SELECT id, nombre, grupo_id, usuario_id FROM carpetas WHERE id = ? AND {condicion}',
+                                  (carpeta_id, *parametros)).fetchone()
+    return _carpeta_a_dict(fila) if fila else None
 
 
-def _nombre_carpeta(nombre, excepto=None):
+def _nombre_carpeta(nombre, grupo_id=None, excepto=None):
+    """El nombre limpio. No puede repetirse entre las carpetas personales del usuario ni dentro de un grupo."""
     nombre = ' '.join((nombre or '').split())
     if not 1 <= len(nombre) <= 40:
         raise DatosNoValidos('Ponle a la carpeta un nombre de hasta 40 caracteres')
+    if grupo_id:
+        donde, parametros = 'grupo_id = ?', [grupo_id]
+    else:
+        donde, parametros = 'usuario_id = ? AND grupo_id IS NULL', [_id_carpetas()]
     with get_db_connection() as connection:
         repetida = connection.execute(
-            'SELECT 1 FROM carpetas WHERE usuario_id = ? AND nombre = ? COLLATE NOCASE AND id IS NOT ?',
-            (_id_carpetas(), nombre, excepto)).fetchone()
+            f'SELECT 1 FROM carpetas WHERE {donde} AND nombre = ? COLLATE NOCASE AND id IS NOT ?',
+            (*parametros, nombre, excepto)).fetchone()
     if repetida:
-        raise DatosNoValidos(f'Ya tienes una carpeta llamada «{nombre}»')
+        raise DatosNoValidos(f'Ya hay una carpeta llamada «{nombre}» en ese grupo' if grupo_id
+                             else f'Ya tienes una carpeta llamada «{nombre}»')
     return nombre
 
 
-def crear_carpeta(nombre):
-    nombre = _nombre_carpeta(nombre)
-    if len(listar_carpetas()) >= MAX_CARPETAS:
-        raise DatosNoValidos(f'Como mucho puedes tener {MAX_CARPETAS} carpetas')
+def _leer_grupo(grupo_id):
+    return int(grupo_id) if str(grupo_id or '').strip().isdigit() else None
+
+
+def crear_carpeta(nombre, grupo_id=None):
+    """Crea una carpeta solo para el usuario actual o, con grupo_id, para un grupo suyo."""
+    grupo_id = comprobar_grupo('tareas', _leer_grupo(grupo_id))
+    nombre = _nombre_carpeta(nombre, grupo_id)
     with get_db_connection() as connection:
-        cursor = connection.execute('INSERT INTO carpetas (usuario_id, nombre) VALUES (?, ?)', (_id_carpetas(), nombre))
+        creadas = connection.execute('SELECT COUNT(*) FROM carpetas WHERE usuario_id = ?', (_id_carpetas(),)).fetchone()[0]
+    if creadas >= MAX_CARPETAS:
+        raise DatosNoValidos(f'Como mucho puedes crear {MAX_CARPETAS} carpetas')
+    with get_db_connection() as connection:
+        cursor = connection.execute('INSERT INTO carpetas (usuario_id, nombre, grupo_id) VALUES (?, ?, ?)',
+                                    (_id_carpetas(), nombre, grupo_id))
         connection.commit()
     return obtener_carpeta(cursor.lastrowid)
 
 
-def renombrar_carpeta(carpeta_id, nombre):
-    """Devuelve la carpeta renombrada o None si no existe (o es de otro usuario)."""
-    if obtener_carpeta(carpeta_id) is None:
+def cambiar_carpeta(carpeta_id, datos):
+    """Cambia el nombre y para quién es la carpeta (datos: nombre y/o grupo_id). Devuelve la carpeta,
+    o None si no existe o el usuario no la ve.
+
+    Al pasarla a un grupo, todas sus tareas pasan a ser del grupo. Al volver a ser solo de quien la creó,
+    las tareas suyas dejan de compartirse; las de los demás siguen en el grupo, fuera de la carpeta.
+    """
+    carpeta = obtener_carpeta(carpeta_id)
+    if carpeta is None:
         return None
-    nombre = _nombre_carpeta(nombre, excepto=carpeta_id)
+    grupo_id = carpeta['grupo_id']
+    if 'grupo_id' in datos and _leer_grupo(datos.get('grupo_id')) != carpeta['grupo_id']:
+        grupo_id = _leer_grupo(datos.get('grupo_id'))
+        if carpeta['grupo_id'] and grupo_id:
+            raise DatosNoValidos('Para pasarla a otro grupo, primero hazla solo tuya')
+        if carpeta['grupo_id'] and not carpeta['mia']:
+            raise DatosNoValidos('Solo quien creó la carpeta puede dejar de compartirla')
+        comprobar_grupo('tareas', grupo_id)
+    nombre = _nombre_carpeta(datos['nombre'] if 'nombre' in datos else carpeta['nombre'], grupo_id, excepto=carpeta_id)
+
+    a_compartir = []
+    if grupo_id and not carpeta['grupo_id']:
+        # Sus tareas pasan al grupo (las que el usuario puede cambiar así; las demás salen de la carpeta)
+        with get_db_connection() as connection:
+            ids = [f[0] for f in connection.execute(
+                'SELECT tarea_id FROM tarea_carpetas WHERE carpeta_id = ? AND usuario_id = ?', (carpeta_id, _id_carpetas()))]
+        for tarea in filter(None, map(fetch_task, ids)):
+            try:
+                comprobar_grupo('tareas', grupo_id, tarea)
+                a_compartir.append(tarea['id'])
+            except DatosNoValidos:
+                pass
+
     with get_db_connection() as connection:
-        connection.execute('UPDATE carpetas SET nombre = ? WHERE id = ? AND usuario_id = ?',
-                           (nombre, carpeta_id, _id_carpetas()))
+        connection.execute('UPDATE carpetas SET nombre = ?, grupo_id = ? WHERE id = ?', (nombre, grupo_id, carpeta_id))
+        if grupo_id and not carpeta['grupo_id']:
+            for tarea_id in a_compartir:
+                connection.execute('UPDATE tareas SET grupo_id = ?, carpeta_compartida = ? WHERE id = ?',
+                                   (grupo_id, carpeta_id, tarea_id))
+                connection.execute('DELETE FROM tarea_carpetas WHERE tarea_id = ?', (tarea_id,))
+            connection.execute('DELETE FROM tarea_carpetas WHERE carpeta_id = ?', (carpeta_id,))
+        elif carpeta['grupo_id'] and not grupo_id:
+            mias = 'usuario_id = ? OR usuario_id IS NULL' if id_dueno() == id_admin_principal() else 'usuario_id = ?'
+            for (tarea_id,) in connection.execute(
+                    f'SELECT id FROM tareas WHERE carpeta_compartida = ? AND ({mias})', (carpeta_id, id_dueno())).fetchall():
+                connection.execute('UPDATE tareas SET grupo_id = NULL WHERE id = ?', (tarea_id,))
+                connection.execute('INSERT OR REPLACE INTO tarea_carpetas (tarea_id, usuario_id, carpeta_id) '
+                                   'VALUES (?, ?, ?)', (tarea_id, _id_carpetas(), carpeta_id))
+            connection.execute('UPDATE tareas SET carpeta_compartida = NULL WHERE carpeta_compartida = ?', (carpeta_id,))
         connection.commit()
     return obtener_carpeta(carpeta_id)
 
 
 def borrar_carpeta(carpeta_id):
-    """Borra la carpeta; sus tareas se quedan, sin carpeta. Devuelve False si no existe."""
+    """Borra la carpeta; sus tareas se quedan, sin carpeta (y las de un grupo, en el grupo).
+    Devuelve False si no existe."""
     if obtener_carpeta(carpeta_id) is None:
         return False
     with get_db_connection() as connection:
-        connection.execute('DELETE FROM tarea_carpetas WHERE carpeta_id = ? AND usuario_id = ?',
-                           (carpeta_id, _id_carpetas()))
-        connection.execute('DELETE FROM carpetas WHERE id = ? AND usuario_id = ?', (carpeta_id, _id_carpetas()))
+        connection.execute('DELETE FROM tarea_carpetas WHERE carpeta_id = ?', (carpeta_id,))
+        connection.execute('UPDATE tareas SET carpeta_compartida = NULL WHERE carpeta_compartida = ?', (carpeta_id,))
+        connection.execute('DELETE FROM carpetas WHERE id = ?', (carpeta_id,))
         connection.commit()
     return True
 
 
 def comprobar_carpeta(carpeta_id):
-    """La carpeta (del usuario actual) en la que se quiere poner una tarea, o None para ninguna."""
+    """La carpeta (que ve el usuario actual) en la que se quiere poner una tarea, o None para ninguna."""
     if carpeta_id in (None, ''):
         return None
-    if not str(carpeta_id).strip().isdigit() or obtener_carpeta(int(carpeta_id)) is None:
+    carpeta = obtener_carpeta(int(carpeta_id)) if str(carpeta_id).strip().isdigit() else None
+    if carpeta is None:
         raise DatosNoValidos('Esa carpeta no existe')
-    return int(carpeta_id)
+    return carpeta
 
 
-def _poner_en_carpeta(connection, tarea_id, carpeta_id):
+def _poner_en_carpeta(connection, tarea_id, carpeta_id, grupo_id):
+    """Coloca la tarea en la carpeta: si es de grupo, para todos; si es personal, solo para el usuario actual."""
+    fila = connection.execute('SELECT grupo_id FROM carpetas WHERE id = ?', (carpeta_id,)).fetchone() if carpeta_id else None
+    if fila and fila['grupo_id'] and fila['grupo_id'] == grupo_id:
+        connection.execute('UPDATE tareas SET carpeta_compartida = ? WHERE id = ?', (carpeta_id, tarea_id))
+        connection.execute('DELETE FROM tarea_carpetas WHERE tarea_id = ?', (tarea_id,))
+        return
+    connection.execute('UPDATE tareas SET carpeta_compartida = NULL WHERE id = ?', (tarea_id,))
     connection.execute('DELETE FROM tarea_carpetas WHERE tarea_id = ? AND usuario_id = ?', (tarea_id, _id_carpetas()))
-    if carpeta_id:
+    if fila and not fila['grupo_id']:
         connection.execute('INSERT INTO tarea_carpetas (tarea_id, usuario_id, carpeta_id) VALUES (?, ?, ?)',
                            (tarea_id, _id_carpetas(), carpeta_id))
 
@@ -1110,7 +1212,8 @@ def borrar_usuario(usuario_id):
         connection.execute('DELETE FROM tareas WHERE usuario_id = ? AND grupo_id IS NULL', (usuario_id,))
         connection.executemany('DELETE FROM recordatorios WHERE destino = ?', [(c,) for c in usuario['chats']])
         connection.execute('DELETE FROM tarea_carpetas WHERE usuario_id = ?', (usuario_id,))
-        connection.execute('DELETE FROM carpetas WHERE usuario_id = ?', (usuario_id,))
+        # Sus carpetas personales; las de grupo se quedan en el grupo
+        connection.execute('DELETE FROM carpetas WHERE usuario_id = ? AND grupo_id IS NULL', (usuario_id,))
         # Las tareas que se acaban de borrar tampoco pueden seguir en las carpetas de otros
         connection.execute('DELETE FROM tarea_carpetas WHERE tarea_id NOT IN (SELECT id FROM tareas)')
         connection.execute('DELETE FROM usuarios WHERE id = ?', (usuario_id,))
@@ -1267,6 +1370,9 @@ def salir_de_grupo(grupo_id, usuario_id):
         if not quedan:
             for tabla in ('tareas', 'eventos', 'recordatorios'):
                 connection.execute(f'UPDATE {tabla} SET grupo_id = NULL WHERE grupo_id = ?', (grupo_id,))
+            connection.execute('UPDATE tareas SET carpeta_compartida = NULL WHERE carpeta_compartida IN '
+                               '(SELECT id FROM carpetas WHERE grupo_id = ?)', (grupo_id,))
+            connection.execute('DELETE FROM carpetas WHERE grupo_id = ?', (grupo_id,))
             connection.execute('DELETE FROM grupo_miembros WHERE grupo_id = ?', (grupo_id,))
             connection.execute('DELETE FROM grupos WHERE id = ?', (grupo_id,))
         connection.commit()

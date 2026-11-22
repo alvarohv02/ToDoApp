@@ -3202,7 +3202,31 @@ tbody tr:last-child td {
 
 .carpeta-acciones {
     display: inline-flex;
-    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+}
+
+.carpeta-para {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 650;
+}
+
+.carpeta-para .input,
+.carpeta-nueva select.input {
+    width: auto;
+    max-width: 13rem;
+    padding-top: 0.35rem;
+    padding-bottom: 0.35rem;
+    font-size: 0.85rem;
+}
+
+.carpeta-de-grupo {
+    font-size: 0.8rem;
 }
 
 .enlace-accion {

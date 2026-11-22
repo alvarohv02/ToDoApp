@@ -345,11 +345,12 @@ def tareas_api():
 
 @app.route('/api/carpetas', methods=['GET', 'POST'])
 def carpetas_api():
-    """Carpetas de tareas del usuario ("Universidad", "Casa"...)."""
+    """Carpetas de tareas que ve el usuario ("Universidad", "Casa"...): las suyas y las de sus grupos."""
     if request.method == 'GET':
         return jsonify(db.listar_carpetas())
     try:
-        carpeta = db.crear_carpeta((request.get_json(silent=True) or {}).get('nombre'))
+        datos = request.get_json(silent=True) or {}
+        carpeta = db.crear_carpeta(datos.get('nombre'), datos.get('grupo_id'))
     except db.DatosNoValidos as error:
         return jsonify({'error': error.mensaje}), 400
     return jsonify(carpeta), 201
@@ -362,7 +363,9 @@ def carpeta_api(carpeta_id):
             return jsonify({'error': 'Carpeta no encontrada'}), 404
         return '', 204
     try:
-        carpeta = db.renombrar_carpeta(carpeta_id, (request.get_json(silent=True) or {}).get('nombre'))
+        # nombre y/o grupo_id (null: solo para quien la creó)
+        datos = request.get_json(silent=True) or {}
+        carpeta = db.cambiar_carpeta(carpeta_id, {k: v for k, v in datos.items() if k in ('nombre', 'grupo_id')})
     except db.DatosNoValidos as error:
         return jsonify({'error': error.mensaje}), 400
     if carpeta is None:

@@ -986,6 +986,7 @@ function renderizarVistaTareas() {
         filtroCarpeta: leerFiltroCarpeta(),
         creandoCarpeta: false,
         nombreCarpetaNueva: '',
+        grupoCarpetaNueva: null,
         tareas: [],
         cargando: true,
         errorCarga: '',
@@ -1019,6 +1020,7 @@ function renderizarVistaTareas() {
         guardarFiltroCarpeta(filtro);
         // Una tarea nueva va a la carpeta que se está viendo
         this.nuevaTarea.carpeta_id = typeof filtro === 'number' ? filtro : null;
+        this.alCambiarCarpeta(this.nuevaTarea);
       }
     },
 
@@ -1043,6 +1045,60 @@ function renderizarVistaTareas() {
         return this.tareas.filter((tarea) => this.enFiltro(tarea, filtro)).length;
       },
 
+      carpetaPorId(carpetaId) {
+        return this.carpetas.find((c) => c.id === carpetaId) || null;
+      },
+
+      esCarpetaDeGrupo(carpetaId) {
+        const carpeta = this.carpetaPorId(carpetaId);
+        return Boolean(carpeta && carpeta.grupo_id);
+      },
+
+      textoCarpeta(carpeta) {
+        return carpeta.grupo_id ? `📁 ${carpeta.nombre} (👨‍👩‍👧 ${nombreGrupo(carpeta.grupo_id)})` : `📁 ${carpeta.nombre}`;
+      },
+
+      // Lo que va en una carpeta de grupo se comparte con ese grupo
+      alCambiarCarpeta(tarea) {
+        const carpeta = this.carpetaPorId(tarea.carpeta_id);
+        if (carpeta && carpeta.grupo_id) {
+          tarea.grupo_id = carpeta.grupo_id;
+        }
+      },
+
+      // Grupos a los que se puede pasar la carpeta: el suyo si ya es de un grupo; si es personal, cualquiera
+      gruposParaCarpeta(carpeta) {
+        if (carpeta.grupo_id) {
+          return [{ id: carpeta.grupo_id, nombre: nombreGrupo(carpeta.grupo_id) }];
+        }
+        return this.gruposParaTareas();
+      },
+
+      async cambiarParaQuien(evento) {
+        const carpeta = this.carpetaElegida;
+        const grupoId = evento.target.value ? Number(evento.target.value) : null;
+        const tareasDentro = this.contarEn(carpeta.id);
+        const aviso = grupoId
+          ? `¿Compartir la carpeta «${carpeta.nombre}» con ${nombreGrupo(grupoId)}? Sus ${tareasDentro} tareas pasarán a verlas y cambiarlas todos los miembros del grupo.`
+          : `¿Hacer «${carpeta.nombre}» solo tuya? Tus tareas de la carpeta dejarán de compartirse; las que añadieron otros miembros seguirán en el grupo, fuera de la carpeta.`;
+        if (!window.confirm(aviso)) {
+          evento.target.value = carpeta.grupo_id ? String(carpeta.grupo_id) : '';
+          return;
+        }
+        try {
+          const nueva = await peticionCarpeta(`/api/carpetas/${carpeta.id}`, { method: 'PUT', body: JSON.stringify({ grupo_id: grupoId }) });
+          this.carpetas = this.carpetas.map((c) => (c.id === nueva.id ? nueva : c));
+          this.errorCarga = '';
+          if (this.nuevaTarea.carpeta_id === nueva.id) {
+            this.nuevaTarea.grupo_id = nueva.grupo_id;  // la tarea nueva sigue a su carpeta
+          }
+          await this.recargarTareas();  // han cambiado varias tareas a la vez
+        } catch (error) {
+          this.errorCarga = error.message;
+          evento.target.value = carpeta.grupo_id ? String(carpeta.grupo_id) : '';
+        }
+      },
+
       nombreCarpeta(carpetaId) {
         const carpeta = this.carpetas.find((c) => c.id === carpetaId);
         return carpeta ? carpeta.nombre : '';
@@ -1060,6 +1116,7 @@ function renderizarVistaTareas() {
           this.filtroCarpeta = 'todas';
         }
         this.nuevaTarea.carpeta_id = this.carpetaElegida ? this.carpetaElegida.id : null;
+        this.alCambiarCarpeta(this.nuevaTarea);
       },
 
       async crearCarpeta() {
@@ -1068,9 +1125,12 @@ function renderizarVistaTareas() {
           return;
         }
         try {
-          const carpeta = await peticionCarpeta('/api/carpetas', { method: 'POST', body: JSON.stringify({ nombre }) });
+          const carpeta = await peticionCarpeta('/api/carpetas', {
+            method: 'POST', body: JSON.stringify({ nombre, grupo_id: this.grupoCarpetaNueva })
+          });
           this.carpetas = [...this.carpetas, carpeta].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
           this.nombreCarpetaNueva = '';
+          this.grupoCarpetaNueva = null;
           this.creandoCarpeta = false;
           this.filtroCarpeta = carpeta.id;
           this.errorCarga = '';
@@ -1097,7 +1157,10 @@ function renderizarVistaTareas() {
 
       async borrarCarpeta() {
         const carpeta = this.carpetaElegida;
-        if (!carpeta || !window.confirm(`¿Borrar la carpeta «${carpeta.nombre}»? Sus tareas no se borran: se quedan sin carpeta.`)) {
+        const aviso = carpeta && carpeta.grupo_id
+          ? `¿Borrar la carpeta «${carpeta.nombre}» para todo el grupo? Sus tareas no se borran: siguen compartidas, sin carpeta.`
+          : `¿Borrar la carpeta «${carpeta && carpeta.nombre}»? Sus tareas no se borran: se quedan sin carpeta.`;
+        if (!carpeta || !window.confirm(aviso)) {
           return;
         }
         try {
@@ -1273,6 +1336,7 @@ function renderizarVistaTareas() {
             nombre: '', importancia: '', fecha_limite: '', hora_limite: '', persona: '', grupo_id: null,
             carpeta_id: this.carpetaElegida ? this.carpetaElegida.id : null
           };
+          this.alCambiarCarpeta(this.nuevaTarea);
           this.mostrarFormulario = false;
         } catch (error) {
           this.errorCarga = error.message;
