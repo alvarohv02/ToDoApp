@@ -3109,3 +3109,125 @@ tbody tr:last-child td {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* ---------- Carpetas de tareas ---------- */
+.carpetas {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    margin-bottom: 1rem;
+}
+
+.carpetas-lista {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.carpeta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    max-width: 100%;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.carpeta-chip:hover {
+    color: var(--text);
+    background: var(--surface-hover);
+}
+
+.carpeta-chip.activa {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.carpeta-nombre {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.carpeta-cuenta {
+    min-width: 1.4rem;
+    padding: 0 0.35rem;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--text-faint);
+    font-size: 0.75rem;
+    text-align: center;
+}
+
+.carpeta-chip.activa .carpeta-cuenta {
+    background: transparent;
+    color: inherit;
+}
+
+.carpeta-anadir {
+    border-style: dashed;
+}
+
+.carpeta-nueva {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    max-width: 100%;
+}
+
+.carpeta-nueva .input {
+    flex: 1 1 13rem;
+    min-width: 0;
+    width: 13rem;
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+}
+
+.carpeta-nueva .btn {
+    flex: none;
+    padding: 0.4rem 0.8rem;
+}
+
+.carpeta-acciones {
+    display: inline-flex;
+    gap: 1rem;
+}
+
+.enlace-accion {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+/* Etiqueta de la carpeta de una tarea (cuando se ven todas) */
+.etiqueta-carpeta {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 650;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

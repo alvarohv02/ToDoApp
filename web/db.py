@@ -152,6 +152,33 @@ def init_db():
             '''
         )
 
+        # Carpetas de tareas ("Universidad", "Casa"...): cada usuario tiene las suyas y coloca en ellas
+        # sus tareas, también las compartidas en un grupo (cada miembro las ordena a su manera)
+        connection.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS carpetas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario_id INTEGER NOT NULL,
+                nombre TEXT NOT NULL,
+                creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            '''
+        )
+        connection.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_carpetas_nombre ON carpetas (usuario_id, nombre COLLATE NOCASE)')
+        connection.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS tarea_carpetas (
+                tarea_id TEXT NOT NULL,
+                usuario_id INTEGER NOT NULL,
+                carpeta_id INTEGER NOT NULL,
+                PRIMARY KEY (tarea_id, usuario_id)
+            )
+            '''
+        )
+        connection.execute('DELETE FROM tarea_carpetas WHERE tarea_id NOT IN (SELECT id FROM tareas) '
+                           'OR carpeta_id NOT IN (SELECT id FROM carpetas)')
+
         # Usuarios de la web. La contraseña se guarda solo como hash (scrypt con sal, de Werkzeug).
         # chats: sus chats del bot ("34600111222,tg:123456789"), para saber de quién es cada mensaje.
         # version_sesion: al cambiarla se cierran todas sus sesiones abiertas
@@ -241,7 +268,13 @@ def row_to_task(row):
         'persona': row['persona'],
         'grupo_id': row['grupo_id'],
         'usuario_id': row['usuario_id'],
+        'carpeta_id': row['carpeta_id'] if 'carpeta_id' in row.keys() else None,
     }
+
+
+# Columnas de una tarea, con la carpeta en la que la tiene el usuario actual (parámetro: _id_carpetas())
+_COLUMNAS_TAREA = '''id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona, grupo_id, usuario_id,
+    (SELECT tc.carpeta_id FROM tarea_carpetas tc WHERE tc.tarea_id = tareas.id AND tc.usuario_id = ?) AS carpeta_id'''
 
 
 def fetch_all_tasks():
@@ -249,7 +282,7 @@ def fetch_all_tasks():
     with get_db_connection() as connection:
         rows = connection.execute(
             f'''
-            SELECT id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona, grupo_id, usuario_id
+            SELECT {_COLUMNAS_TAREA}
             FROM tareas
             WHERE {condicion}
             ORDER BY
@@ -260,7 +293,7 @@ def fetch_all_tasks():
                 fecha DESC,
                 nombre COLLATE NOCASE
             ''',
-            parametros,
+            (_id_carpetas(), *parametros),
         ).fetchall()
 
     return [row_to_task(row) for row in rows]
@@ -271,11 +304,11 @@ def fetch_task(task_id):
     with get_db_connection() as connection:
         row = connection.execute(
             f'''
-            SELECT id, nombre, importancia, fecha_limite, hora_limite, status, fecha, persona, grupo_id, usuario_id
+            SELECT {_COLUMNAS_TAREA}
             FROM tareas
             WHERE id = ? AND {condicion}
             ''',
-            (task_id, *parametros),
+            (_id_carpetas(), task_id, *parametros),
         ).fetchone()
 
     return row_to_task(row) if row else None
@@ -321,6 +354,11 @@ def build_task_payload(data, existing=None):
     if not importancia:
         raise DatosNoValidos('La importancia de la tarea es obligatoria')
 
+    if 'carpeta_id' in data:
+        carpeta_id = comprobar_carpeta(data.get('carpeta_id'))
+    else:
+        carpeta_id = existing.get('carpeta_id')
+
     if hora_limite:
         try:
             datetime.strptime(hora_limite, '%H:%M')
@@ -337,6 +375,7 @@ def build_task_payload(data, existing=None):
         'fecha': fecha,
         'persona': persona,
         'grupo_id': grupo_id,
+        'carpeta_id': carpeta_id,
     }
 
 
@@ -352,6 +391,7 @@ def insert_task(data):
             ''',
             (*(task[campo] for campo in CAMPOS), id_dueno(), task['grupo_id']),
         )
+        _poner_en_carpeta(connection, task['id'], task['carpeta_id'])
         connection.commit()
 
     _anotar({'accion': 'borrar', 'tabla': 'tareas', 'id': task['id']})
@@ -389,6 +429,8 @@ def update_task(task_id, data):
                 *parametros,
             ),
         )
+        if task['carpeta_id'] != existing.get('carpeta_id'):
+            _poner_en_carpeta(connection, task_id, task['carpeta_id'])
         connection.commit()
 
     return fetch_task(task_id)
@@ -402,9 +444,98 @@ def delete_task(task_id):
     condicion, parametros = _filtro_dueno('tareas')
     with get_db_connection() as connection:
         cursor = connection.execute(f'DELETE FROM tareas WHERE id = ? AND {condicion}', (task_id, *parametros))
+        # Su sitio en las carpetas se queda, por si se deshace el borrado desde el bot (se limpia al arrancar)
         connection.commit()
 
     return cursor.rowcount > 0
+
+
+# --- Carpetas de tareas ---------------------------------------------------------------
+# Cada usuario tiene sus carpetas. Una tarea está como mucho en una carpeta de cada usuario.
+
+MAX_CARPETAS = 50
+
+
+def _id_carpetas():
+    """Dueño de las carpetas: el usuario actual (0 si aún no hay usuarios)."""
+    return id_dueno() or 0
+
+
+def listar_carpetas():
+    with get_db_connection() as connection:
+        filas = connection.execute('SELECT id, nombre FROM carpetas WHERE usuario_id = ? ORDER BY nombre COLLATE NOCASE',
+                                   (_id_carpetas(),)).fetchall()
+    return [dict(f) for f in filas]
+
+
+def obtener_carpeta(carpeta_id):
+    with get_db_connection() as connection:
+        fila = connection.execute('SELECT id, nombre FROM carpetas WHERE id = ? AND usuario_id = ?',
+                                  (carpeta_id, _id_carpetas())).fetchone()
+    return dict(fila) if fila else None
+
+
+def _nombre_carpeta(nombre, excepto=None):
+    nombre = ' '.join((nombre or '').split())
+    if not 1 <= len(nombre) <= 40:
+        raise DatosNoValidos('Ponle a la carpeta un nombre de hasta 40 caracteres')
+    with get_db_connection() as connection:
+        repetida = connection.execute(
+            'SELECT 1 FROM carpetas WHERE usuario_id = ? AND nombre = ? COLLATE NOCASE AND id IS NOT ?',
+            (_id_carpetas(), nombre, excepto)).fetchone()
+    if repetida:
+        raise DatosNoValidos(f'Ya tienes una carpeta llamada «{nombre}»')
+    return nombre
+
+
+def crear_carpeta(nombre):
+    nombre = _nombre_carpeta(nombre)
+    if len(listar_carpetas()) >= MAX_CARPETAS:
+        raise DatosNoValidos(f'Como mucho puedes tener {MAX_CARPETAS} carpetas')
+    with get_db_connection() as connection:
+        cursor = connection.execute('INSERT INTO carpetas (usuario_id, nombre) VALUES (?, ?)', (_id_carpetas(), nombre))
+        connection.commit()
+    return obtener_carpeta(cursor.lastrowid)
+
+
+def renombrar_carpeta(carpeta_id, nombre):
+    """Devuelve la carpeta renombrada o None si no existe (o es de otro usuario)."""
+    if obtener_carpeta(carpeta_id) is None:
+        return None
+    nombre = _nombre_carpeta(nombre, excepto=carpeta_id)
+    with get_db_connection() as connection:
+        connection.execute('UPDATE carpetas SET nombre = ? WHERE id = ? AND usuario_id = ?',
+                           (nombre, carpeta_id, _id_carpetas()))
+        connection.commit()
+    return obtener_carpeta(carpeta_id)
+
+
+def borrar_carpeta(carpeta_id):
+    """Borra la carpeta; sus tareas se quedan, sin carpeta. Devuelve False si no existe."""
+    if obtener_carpeta(carpeta_id) is None:
+        return False
+    with get_db_connection() as connection:
+        connection.execute('DELETE FROM tarea_carpetas WHERE carpeta_id = ? AND usuario_id = ?',
+                           (carpeta_id, _id_carpetas()))
+        connection.execute('DELETE FROM carpetas WHERE id = ? AND usuario_id = ?', (carpeta_id, _id_carpetas()))
+        connection.commit()
+    return True
+
+
+def comprobar_carpeta(carpeta_id):
+    """La carpeta (del usuario actual) en la que se quiere poner una tarea, o None para ninguna."""
+    if carpeta_id in (None, ''):
+        return None
+    if not str(carpeta_id).strip().isdigit() or obtener_carpeta(int(carpeta_id)) is None:
+        raise DatosNoValidos('Esa carpeta no existe')
+    return int(carpeta_id)
+
+
+def _poner_en_carpeta(connection, tarea_id, carpeta_id):
+    connection.execute('DELETE FROM tarea_carpetas WHERE tarea_id = ? AND usuario_id = ?', (tarea_id, _id_carpetas()))
+    if carpeta_id:
+        connection.execute('INSERT INTO tarea_carpetas (tarea_id, usuario_id, carpeta_id) VALUES (?, ?, ?)',
+                           (tarea_id, _id_carpetas(), carpeta_id))
 
 
 # --- WhatsApp -----------------------------------------------------------------
@@ -978,6 +1109,10 @@ def borrar_usuario(usuario_id):
         connection.execute('DELETE FROM eventos WHERE usuario_id = ? AND grupo_id IS NULL', (usuario_id,))
         connection.execute('DELETE FROM tareas WHERE usuario_id = ? AND grupo_id IS NULL', (usuario_id,))
         connection.executemany('DELETE FROM recordatorios WHERE destino = ?', [(c,) for c in usuario['chats']])
+        connection.execute('DELETE FROM tarea_carpetas WHERE usuario_id = ?', (usuario_id,))
+        connection.execute('DELETE FROM carpetas WHERE usuario_id = ?', (usuario_id,))
+        # Las tareas que se acaban de borrar tampoco pueden seguir en las carpetas de otros
+        connection.execute('DELETE FROM tarea_carpetas WHERE tarea_id NOT IN (SELECT id FROM tareas)')
         connection.execute('DELETE FROM usuarios WHERE id = ?', (usuario_id,))
         connection.commit()
 

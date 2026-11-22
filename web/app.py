@@ -343,6 +343,33 @@ def tareas_api():
     return jsonify(task), 201
 
 
+@app.route('/api/carpetas', methods=['GET', 'POST'])
+def carpetas_api():
+    """Carpetas de tareas del usuario ("Universidad", "Casa"...)."""
+    if request.method == 'GET':
+        return jsonify(db.listar_carpetas())
+    try:
+        carpeta = db.crear_carpeta((request.get_json(silent=True) or {}).get('nombre'))
+    except db.DatosNoValidos as error:
+        return jsonify({'error': error.mensaje}), 400
+    return jsonify(carpeta), 201
+
+
+@app.route('/api/carpetas/<int:carpeta_id>', methods=['PUT', 'DELETE'])
+def carpeta_api(carpeta_id):
+    if request.method == 'DELETE':
+        if not db.borrar_carpeta(carpeta_id):
+            return jsonify({'error': 'Carpeta no encontrada'}), 404
+        return '', 204
+    try:
+        carpeta = db.renombrar_carpeta(carpeta_id, (request.get_json(silent=True) or {}).get('nombre'))
+    except db.DatosNoValidos as error:
+        return jsonify({'error': error.mensaje}), 400
+    if carpeta is None:
+        return jsonify({'error': 'Carpeta no encontrada'}), 404
+    return jsonify(carpeta)
+
+
 @app.route('/api/tareas/<task_id>', methods=['PUT', 'DELETE'])
 def tarea_api(task_id):
     if request.method == 'DELETE':

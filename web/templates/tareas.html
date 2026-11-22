@@ -27,22 +27,48 @@
         </div>
     </header>
 
+    <nav class="carpetas" aria-label="Carpetas">
+        <div class="carpetas-lista">
+            <button type="button" class="carpeta-chip" :class="{ activa: filtroCarpeta === 'todas' }" @click="filtroCarpeta = 'todas'">
+                Todas <span class="carpeta-cuenta" v-text="tareas.length"></span>
+            </button>
+            <button type="button" class="carpeta-chip" v-for="carpeta in carpetas" :key="carpeta.id"
+                    :class="{ activa: filtroCarpeta === carpeta.id }" @click="filtroCarpeta = carpeta.id">
+                📁 <span class="carpeta-nombre" v-text="carpeta.nombre"></span> <span class="carpeta-cuenta" v-text="contarEn(carpeta.id)"></span>
+            </button>
+            <button type="button" class="carpeta-chip" v-if="carpetas.length" :class="{ activa: filtroCarpeta === 'sin' }" @click="filtroCarpeta = 'sin'">
+                Sin carpeta <span class="carpeta-cuenta" v-text="contarEn('sin')"></span>
+            </button>
+            <form v-if="creandoCarpeta" class="carpeta-nueva" @submit.prevent="crearCarpeta">
+                <input class="input" v-model="nombreCarpetaNueva" maxlength="40" placeholder="Nombre (p. ej. Universidad)"
+                       aria-label="Nombre de la carpeta nueva" required @keydown.esc="creandoCarpeta = false">
+                <button type="submit" class="btn btn-primary">Crear</button>
+                <button type="button" class="btn btn-ghost" @click="creandoCarpeta = false">Cancelar</button>
+            </form>
+            <button v-else type="button" class="carpeta-chip carpeta-anadir" @click="creandoCarpeta = true">+ Carpeta</button>
+        </div>
+        <div v-if="carpetaElegida" class="carpeta-acciones">
+            <button type="button" class="enlace-accion" @click="renombrarCarpeta">Renombrar</button>
+            <button type="button" class="enlace-boton" @click="borrarCarpeta">Borrar carpeta</button>
+        </div>
+    </nav>
+
     <section class="stats stats-compact" aria-label="Resumen de tareas">
         <div class="stat">
             <span class="stat-label">Total</span>
-            <strong class="stat-value">{{ tareas.length }}</strong>
+            <strong class="stat-value">{{ tareasVisibles.length }}</strong>
         </div>
         <div class="stat stat-warning">
             <span class="stat-label">Sin empezar</span>
-            <strong class="stat-value">{{ tareas.filter(t => t.status === 'Sin Empezar').length }}</strong>
+            <strong class="stat-value">{{ tareasVisibles.filter(t => t.status === 'Sin Empezar').length }}</strong>
         </div>
         <div class="stat stat-info">
             <span class="stat-label">En curso</span>
-            <strong class="stat-value">{{ tareas.filter(t => t.status === 'En Curso').length }}</strong>
+            <strong class="stat-value">{{ tareasVisibles.filter(t => t.status === 'En Curso').length }}</strong>
         </div>
         <div class="stat stat-success">
             <span class="stat-label">Terminadas</span>
-            <strong class="stat-value">{{ tareas.filter(t => t.status === 'Terminado').length }}</strong>
+            <strong class="stat-value">{{ tareasVisibles.filter(t => t.status === 'Terminado').length }}</strong>
         </div>
     </section>
 
@@ -82,6 +108,13 @@
                 <option v-for="grupo in gruposParaTareas()" :key="grupo.id" :value="grupo.id" v-text="'👨‍👩‍👧 ' + grupo.nombre"></option>
             </select>
         </label>
+        <label class="field" v-if="carpetas.length">
+            <span>Carpeta</span>
+            <select class="input" v-model="nuevaTarea.carpeta_id">
+                <option :value="null">Sin carpeta</option>
+                <option v-for="carpeta in carpetas" :key="carpeta.id" :value="carpeta.id" v-text="'📁 ' + carpeta.nombre"></option>
+            </select>
+        </label>
         <div class="form-actions">
             <button type="submit" class="btn btn-primary">Añadir tarea</button>
         </div>
@@ -96,10 +129,10 @@
                  @drop="drop(estado)">
             <header class="column-header">
                 <h2 class="column-title"><span class="column-dot"></span>{{ estado }}</h2>
-                <span class="column-count">{{ tareas.filter(t => t.status === estado).length }}</span>
+                <span class="column-count">{{ tareasVisibles.filter(t => t.status === estado).length }}</span>
             </header>
             <div class="column-list">
-            <article class="task" v-for="(tarea, i) in tareas.filter(t => t.status === estado)"
+            <article class="task" v-for="(tarea, i) in tareasVisibles.filter(t => t.status === estado)"
                      :key="tarea.id || tarea.nombre || i"
                      draggable="true" @dragstart="dragStart(tarea)" @dragend="dragEnd"
                      tabindex="0" title="Pulsa para modificar · arrastra para cambiar de estado"
@@ -112,16 +145,17 @@
                               v-text="'📅 ' + formatearFecha(tarea.fecha_limite) + (tarea.hora_limite ? ' · ' + tarea.hora_limite : '')"></span>
                         <span v-if="!esPersonaDefecto(tarea.persona)" class="task-meta" v-text="'👤 ' + tarea.persona"></span>
                         <span v-if="tarea.grupo_id" class="etiqueta-grupo" title="Compartida con el grupo" v-text="'👨‍👩‍👧 ' + nombreGrupo(tarea.grupo_id)"></span>
+                        <span v-if="tarea.carpeta_id && nombreCarpeta(tarea.carpeta_id) && typeof filtroCarpeta !== 'number'" class="etiqueta-carpeta" v-text="'📁 ' + nombreCarpeta(tarea.carpeta_id)"></span>
                     </div>
                 </div>
                 <div class="task-actions">
                     <button type="button" class="icon-btn move" :title="estado === 'Terminado' ? 'Volver a Sin empezar' : 'Pasar a la siguiente columna'"
                             @click.stop="avanzar(tarea)" v-text="estado === 'Terminado' ? '↺' : '➜'"></button>
                     <button type="button" class="icon-btn edit" title="Modificar tarea" @click.stop="abrirModal(tarea, tarea.id)">✏️</button>
-                    <button type="button" class="icon-btn delete" title="Borrar tarea" @click.stop="eliminarTarea(i, estado)">✕</button>
+                    <button type="button" class="icon-btn delete" title="Borrar tarea" @click.stop="eliminarTarea(tarea)">✕</button>
                 </div>
             </article>
-            <p v-if="!tareas.some(t => t.status === estado)" class="column-empty">Suelta aquí una tarea</p>
+            <p v-if="!tareasVisibles.some(t => t.status === estado)" class="column-empty">Suelta aquí una tarea</p>
             </div>
         </section>
     </div>
@@ -138,7 +172,7 @@
         </div>
     </div>
 
-    <div v-else class="card table-shell">
+    <div v-if="vista === 'tabla'" class="card table-shell">
         <table>
             <thead>
                 <tr>
@@ -157,6 +191,7 @@
                     <td class="cell-title">
                         <span v-text="tarea.nombre"></span>
                         <span v-if="tarea.grupo_id" class="etiqueta-grupo" title="Compartida con el grupo" v-text="'👨‍👩‍👧 ' + nombreGrupo(tarea.grupo_id)"></span>
+                        <span v-if="tarea.carpeta_id && nombreCarpeta(tarea.carpeta_id) && typeof filtroCarpeta !== 'number'" class="etiqueta-carpeta" v-text="'📁 ' + nombreCarpeta(tarea.carpeta_id)"></span>
                     </td>
                     <td><span class="pill" :class="'imp-' + (tarea.importancia || '').toLowerCase()" v-text="tarea.importancia"></span></td>
                     <td><span class="pill" :class="'status-' + tarea.status.toLowerCase().replace(/\s+/g, '-')" v-text="tarea.status"></span></td>
@@ -176,6 +211,9 @@
                 </tr>
                 <tr v-if="!tareas.length">
                     <td colspan="7" class="empty-state">No hay tareas todavía. Pulsa «+ Nueva tarea» o pídeselo al bot.</td>
+                </tr>
+                <tr v-else-if="!tareasVisibles.length">
+                    <td colspan="7" class="empty-state">No hay tareas en esta carpeta.</td>
                 </tr>
             </tbody>
         </table>
@@ -225,6 +263,13 @@
                 <select class="input" v-model="tareaEditando.grupo_id">
                     <option :value="null">Solo yo</option>
                     <option v-for="grupo in gruposParaTareas(tareaEditando.grupo_id)" :key="grupo.id" :value="grupo.id" v-text="'👨‍👩‍👧 ' + grupo.nombre"></option>
+                </select>
+            </label>
+            <label class="field" v-if="carpetas.length">
+                <span>Carpeta</span>
+                <select class="input" v-model="tareaEditando.carpeta_id">
+                    <option :value="null">Sin carpeta</option>
+                    <option v-for="carpeta in carpetas" :key="carpeta.id" :value="carpeta.id" v-text="'📁 ' + carpeta.nombre"></option>
                 </select>
             </label>
             <div class="modal-actions">

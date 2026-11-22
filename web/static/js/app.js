@@ -67,7 +67,8 @@ function normalizarTarea(tarea) {
     status: tarea.status || 'Sin Empezar',
     fecha: tarea.fecha || new Date().toLocaleDateString(),
     persona: tarea.persona || PERSONA_DEFECTO,
-    grupo_id: tarea.grupo_id || null
+    grupo_id: tarea.grupo_id || null,
+    carpeta_id: tarea.carpeta_id || null
   };
 }
 
@@ -864,6 +865,45 @@ function leerOrdenTabla() {
   return { campo: '', sentido: 'asc' };
 }
 
+// --- Carpetas de tareas ("Universidad", "Casa"...) ------------------------------------------
+// Filtro elegido: 'todas', 'sin' (sin carpeta) o el id de una carpeta. Se recuerda en este navegador.
+const CLAVE_FILTRO_CARPETA = 'filtroCarpeta';
+
+function leerFiltroCarpeta() {
+  try {
+    const guardado = window.localStorage.getItem(CLAVE_FILTRO_CARPETA);
+    if (guardado === 'sin') {
+      return 'sin';
+    }
+    if (/^\d+$/.test(guardado || '')) {
+      return Number(guardado);
+    }
+  } catch (error) {
+    // sin almacenamiento: todas
+  }
+  return 'todas';
+}
+
+function guardarFiltroCarpeta(filtro) {
+  try {
+    window.localStorage.setItem(CLAVE_FILTRO_CARPETA, String(filtro));
+  } catch (error) {
+    // no pasa nada si no se puede guardar
+  }
+}
+
+async function peticionCarpeta(url, opciones = {}) {
+  const response = await fetch(url, {
+    ...opciones,
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'No se pudo guardar la carpeta');
+  }
+  return response.status === 204 ? null : response.json();
+}
+
 function guardarOrdenTabla(orden) {
   try {
     window.localStorage.setItem(CLAVE_ORDEN_TABLA, JSON.stringify(orden));
@@ -940,8 +980,12 @@ function renderizarVistaTareas() {
         mostrarModal: false,
         tareaEditando: null,
         indiceEditando: null,
-        nuevaTarea: { nombre: '', importancia: '', fecha_limite: '', hora_limite: '', persona: '', grupo_id: null },
+        nuevaTarea: { nombre: '', importancia: '', fecha_limite: '', hora_limite: '', persona: '', grupo_id: null, carpeta_id: null },
         grupos: [],
+        carpetas: [],
+        filtroCarpeta: leerFiltroCarpeta(),
+        creandoCarpeta: false,
+        nombreCarpetaNueva: '',
         tareas: [],
         cargando: true,
         errorCarga: '',
@@ -951,18 +995,35 @@ function renderizarVistaTareas() {
     },
 
     computed: {
+      // Las tareas de la carpeta elegida (o todas)
+      tareasVisibles() {
+        return this.tareas.filter((tarea) => this.enFiltro(tarea, this.filtroCarpeta));
+      },
+
       // Sin orden elegido, la tabla mantiene el del servidor (por fecha límite)
       tareasOrdenadas() {
         const { campo, sentido } = this.orden;
         if (!campo) {
-          return this.tareas;
+          return this.tareasVisibles;
         }
-        return [...this.tareas].sort((a, b) => compararTareas(a, b, campo, sentido));
+        return [...this.tareasVisibles].sort((a, b) => compararTareas(a, b, campo, sentido));
+      },
+
+      carpetaElegida() {
+        return this.carpetas.find((c) => c.id === this.filtroCarpeta) || null;
+      }
+    },
+
+    watch: {
+      filtroCarpeta(filtro) {
+        guardarFiltroCarpeta(filtro);
+        // Una tarea nueva va a la carpeta que se está viendo
+        this.nuevaTarea.carpeta_id = typeof filtro === 'number' ? filtro : null;
       }
     },
 
     async mounted() {
-      const [grupos] = await Promise.all([cargarGrupos(), this.recargarTareas()]);
+      const [grupos] = await Promise.all([cargarGrupos(), this.recargarTareas(), this.recargarCarpetas()]);
       this.grupos = grupos;
     },
 
@@ -970,6 +1031,85 @@ function renderizarVistaTareas() {
       formatearFecha,
       esPersonaDefecto,
       nombreGrupo,
+
+      enFiltro(tarea, filtro) {
+        if (filtro === 'todas') {
+          return true;
+        }
+        return filtro === 'sin' ? !tarea.carpeta_id : tarea.carpeta_id === filtro;
+      },
+
+      contarEn(filtro) {
+        return this.tareas.filter((tarea) => this.enFiltro(tarea, filtro)).length;
+      },
+
+      nombreCarpeta(carpetaId) {
+        const carpeta = this.carpetas.find((c) => c.id === carpetaId);
+        return carpeta ? carpeta.nombre : '';
+      },
+
+      async recargarCarpetas() {
+        try {
+          const carpetas = await peticionCarpeta('/api/carpetas');
+          this.carpetas = Array.isArray(carpetas) ? carpetas : [];
+        } catch (error) {
+          this.carpetas = [];
+        }
+        // La carpeta que se estaba viendo ya no existe (borrada desde otro dispositivo)
+        if (typeof this.filtroCarpeta === 'number' && !this.carpetaElegida) {
+          this.filtroCarpeta = 'todas';
+        }
+        this.nuevaTarea.carpeta_id = this.carpetaElegida ? this.carpetaElegida.id : null;
+      },
+
+      async crearCarpeta() {
+        const nombre = this.nombreCarpetaNueva.trim();
+        if (!nombre) {
+          return;
+        }
+        try {
+          const carpeta = await peticionCarpeta('/api/carpetas', { method: 'POST', body: JSON.stringify({ nombre }) });
+          this.carpetas = [...this.carpetas, carpeta].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+          this.nombreCarpetaNueva = '';
+          this.creandoCarpeta = false;
+          this.filtroCarpeta = carpeta.id;
+          this.errorCarga = '';
+        } catch (error) {
+          this.errorCarga = error.message;
+        }
+      },
+
+      async renombrarCarpeta() {
+        const carpeta = this.carpetaElegida;
+        const nombre = carpeta && window.prompt('Nuevo nombre de la carpeta', carpeta.nombre);
+        if (!nombre || nombre.trim() === carpeta.nombre) {
+          return;
+        }
+        try {
+          const nueva = await peticionCarpeta(`/api/carpetas/${carpeta.id}`, { method: 'PUT', body: JSON.stringify({ nombre }) });
+          this.carpetas = this.carpetas.map((c) => (c.id === nueva.id ? nueva : c))
+            .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+          this.errorCarga = '';
+        } catch (error) {
+          this.errorCarga = error.message;
+        }
+      },
+
+      async borrarCarpeta() {
+        const carpeta = this.carpetaElegida;
+        if (!carpeta || !window.confirm(`¿Borrar la carpeta «${carpeta.nombre}»? Sus tareas no se borran: se quedan sin carpeta.`)) {
+          return;
+        }
+        try {
+          await peticionCarpeta(`/api/carpetas/${carpeta.id}`, { method: 'DELETE' });
+          this.carpetas = this.carpetas.filter((c) => c.id !== carpeta.id);
+          this.tareas = this.tareas.map((t) => (t.carpeta_id === carpeta.id ? { ...t, carpeta_id: null } : t));
+          this.filtroCarpeta = 'todas';
+          this.errorCarga = '';
+        } catch (error) {
+          this.errorCarga = error.message;
+        }
+      },
 
       // Grupos con los que se pueden compartir tareas (y el de la tarea, aunque ya no comparta tareas)
       gruposParaTareas(grupoActual = null) {
@@ -1124,26 +1264,25 @@ function renderizarVistaTareas() {
             status: 'Sin Empezar',
             fecha: new Date().toLocaleDateString(),
             persona: this.nuevaTarea.persona || PERSONA_DEFECTO,
-            grupo_id: this.nuevaTarea.grupo_id
+            grupo_id: this.nuevaTarea.grupo_id,
+            carpeta_id: this.nuevaTarea.carpeta_id
           });
 
           this.tareas.push(tareaCreada);
-          this.nuevaTarea = { nombre: '', importancia: '', fecha_limite: '', hora_limite: '', persona: '', grupo_id: null };
+          this.nuevaTarea = {
+            nombre: '', importancia: '', fecha_limite: '', hora_limite: '', persona: '', grupo_id: null,
+            carpeta_id: this.carpetaElegida ? this.carpetaElegida.id : null
+          };
           this.mostrarFormulario = false;
         } catch (error) {
           this.errorCarga = error.message;
         }
       },
 
-      async eliminarTarea(index, estado) {
-        const lista = this.tareas.filter((tarea) => tarea.status === estado);
-        const tarea = lista[index];
-
-        if (!tarea) {
-          return;
+      async eliminarTarea(tarea) {
+        if (tarea) {
+          await this.eliminarPorId(tarea.id);
         }
-
-        await this.eliminarPorId(tarea.id);
       },
 
       async eliminarPorId(tareaId) {
