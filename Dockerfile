@@ -39,7 +39,7 @@ WORKDIR /app/web
 EXPOSE 5000
 
 HEALTHCHECK --interval=60s --timeout=5s --start-period=10s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/tareas', timeout=4)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/manifest.webmanifest', timeout=4)"
 
 # Un solo proceso: el bot de Telegram escucha en un hilo y no puede haber dos copias
 CMD ["waitress-serve", "--listen=0.0.0.0:5000", "--threads=4", "app:app"]
