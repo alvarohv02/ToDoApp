@@ -2146,7 +2146,8 @@ tbody tr:last-child td {
         inset: auto 0 0 0;
         z-index: 50;
         display: grid;
-        grid-template-columns: repeat(5, 1fr);
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(0, 1fr);
         padding: 0.35rem 0.4rem calc(0.35rem + env(safe-area-inset-bottom));
         background: color-mix(in srgb, var(--surface) 92%, transparent);
         backdrop-filter: blur(12px);
@@ -3254,4 +3255,341 @@ tbody tr:last-child td {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* ==========================================================================
+   Notas
+   ========================================================================== */
+.notas-acciones {
+    flex-wrap: wrap;
+}
+
+.notas-acciones .btn {
+    white-space: nowrap;
+}
+
+.notas-buscar {
+    width: min(16rem, 100%);
+}
+
+.notas-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    align-items: start;
+    gap: 1rem;
+}
+
+.nota-tarjeta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    min-width: 0;
+    padding: 1rem 1.1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.nota-tarjeta:hover,
+.nota-tarjeta:focus-visible {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow);
+}
+
+.nota-tarjeta-cabecera {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.nota-tarjeta-titulo {
+    margin: 0;
+    font-size: 1.02rem;
+    font-weight: 750;
+    overflow-wrap: anywhere;
+}
+
+.nota-fijada {
+    flex: none;
+    font-size: 0.85rem;
+}
+
+.nota-tarjeta-texto {
+    display: -webkit-box;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.92rem;
+    line-height: 1.45;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    overflow: hidden;
+    -webkit-line-clamp: 8;
+    -webkit-box-orient: vertical;
+}
+
+.nota-tarjeta-texto.es-vacia,
+.nota-tarjeta-vacia {
+    color: var(--text-faint);
+    font-style: italic;
+}
+
+.nota-tarjeta-lista,
+.nota-elementos {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.nota-tarjeta-vacia {
+    padding: 0.2rem 0;
+    font-size: 0.9rem;
+}
+
+/* Elemento de una lista: casilla + texto; pulsado se tacha */
+.nota-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    width: 100%;
+    min-width: 0;
+    padding: 0.3rem 0.2rem;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.93rem;
+    text-align: left;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.nota-check::before {
+    content: "";
+    flex: none;
+    width: 1.05rem;
+    height: 1.05rem;
+    margin-top: 0.1rem;
+    border: 2px solid var(--border-strong);
+    border-radius: 5px;
+    background: var(--surface);
+}
+
+.nota-check:hover {
+    background: var(--surface-hover);
+}
+
+.nota-check[aria-pressed="true"] {
+    color: var(--text-faint);
+    text-decoration: line-through;
+}
+
+.nota-check[aria-pressed="true"]::before {
+    border-color: var(--success);
+    background: var(--success) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / 80% no-repeat;
+}
+
+.nota-tarjeta-mas {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: 0.82rem;
+}
+
+.nota-tarjeta-pie {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.6rem;
+    margin-top: auto;
+    color: var(--text-faint);
+    font-size: 0.78rem;
+}
+
+.nota-progreso {
+    font-weight: 650;
+    color: var(--text-muted);
+}
+
+.nota-fecha {
+    margin-left: auto;
+}
+
+/* Elegir el tipo de nota nueva */
+.nota-tipos {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.nota-tipo {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.3rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.nota-tipo:hover,
+.nota-tipo:focus-visible {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.nota-tipo-icono {
+    font-size: 1.6rem;
+}
+
+.nota-tipo small {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.35;
+}
+
+/* Editor */
+.modal.nota-editor {
+    width: min(640px, 100%);
+}
+
+.nota-titulo {
+    width: 100%;
+    padding: 0.2rem 0;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-size: 1.3rem;
+    font-weight: 800;
+    outline: none;
+}
+
+.nota-titulo:focus {
+    border-bottom-color: var(--accent);
+}
+
+.nota-texto {
+    min-height: 16rem;
+    resize: vertical;
+    line-height: 1.5;
+}
+
+.nota-lista-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.nota-anadir {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.nota-anadir .input {
+    flex: 1;
+    min-width: 0;
+}
+
+.nota-elemento {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.nota-elemento .icon-btn {
+    flex: none;
+    opacity: 0.55;
+}
+
+.nota-elemento:hover .icon-btn,
+.nota-elemento .icon-btn:focus-visible {
+    opacity: 1;
+}
+
+.nota-elemento-campo {
+    flex: 1;
+    min-width: 0;
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+}
+
+.nota-hechos summary {
+    padding: 0.3rem 0;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.nota-lista-acciones {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.nota-pie {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--border);
+}
+
+.nota-compartir {
+    min-width: 11rem;
+}
+
+.nota-estado {
+    flex: 1;
+    min-width: 6rem;
+    color: var(--text-faint);
+    font-size: 0.82rem;
+}
+
+.nota-pie-botones {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+@media (max-width: 700px) {
+    .notas-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .notas-buscar {
+        flex: 1 1 10rem;
+        width: auto;
+    }
+
+    .modal-overlay:has(.nota-editor) {
+        padding: 0.5rem;
+    }
+
+    .modal.nota-editor {
+        max-height: calc(100dvh - 1rem);
+    }
+
+    .nota-tipos {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .nota-elemento .icon-btn {
+        opacity: 1;
+    }
 }

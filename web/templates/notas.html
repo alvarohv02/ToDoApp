@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block titulo %}Notas{% endblock %}
+
+{% block contenido %}
+<div class="page" data-notas>
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Notas</p>
+            <h1>Notas</h1>
+            <p class="page-subtitle">Apuntes de texto libre o listas (como la de la compra) que se tachan al pulsarlas.</p>
+        </div>
+        <div class="page-actions notas-acciones">
+            <input class="input notas-buscar" type="search" placeholder="Buscar en las notas…" aria-label="Buscar en las notas" data-notas-buscar>
+            <button type="button" class="btn btn-primary" data-nota-nueva>+ Nueva nota</button>
+        </div>
+    </header>
+
+    <p class="alert" role="alert" data-notas-error hidden></p>
+    <div class="notas-grid" data-notas-lista></div>
+    <p class="empty-state card" data-notas-vacio hidden></p>
+</div>
+
+<!-- Al crear una nota: ¿texto libre o lista? -->
+<div class="modal-overlay" data-nota-tipo-modal hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="titulo-nota-nueva">
+        <h2 id="titulo-nota-nueva">Nueva nota</h2>
+        <p class="card-text">¿Cómo quieres usarla?</p>
+        <div class="nota-tipos">
+            <button type="button" class="nota-tipo" data-tipo="texto">
+                <span class="nota-tipo-icono" aria-hidden="true">📝</span>
+                <strong>Texto libre</strong>
+                <small>Para escribir lo que quieras: ideas, apuntes, instrucciones…</small>
+            </button>
+            <button type="button" class="nota-tipo" data-tipo="lista">
+                <span class="nota-tipo-icono" aria-hidden="true">☑️</span>
+                <strong>Lista</strong>
+                <small>Elementos que se tachan al pulsarlos, como la lista de la compra.</small>
+            </button>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-cerrar>Cancelar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Editor de una nota -->
+<div class="modal-overlay" data-nota-editor hidden>
+    <div class="modal nota-editor" role="dialog" aria-modal="true" aria-label="Nota">
+        <input class="nota-titulo" placeholder="Título" maxlength="80" aria-label="Título" data-nota-titulo>
+        <textarea class="input nota-texto" placeholder="Escribe aquí…" maxlength="20000" aria-label="Texto de la nota" data-nota-texto></textarea>
+        <div class="nota-lista-editor" data-nota-lista-editor>
+            <form class="nota-anadir" data-nota-anadir>
+                <input class="input" placeholder="Añadir a la lista…" maxlength="2000" aria-label="Nuevo elemento" enterkeyhint="enter" data-nota-elemento>
+                <button type="submit" class="btn btn-primary">Añadir</button>
+            </form>
+            <ul class="nota-elementos" data-nota-pendientes></ul>
+            <details class="nota-hechos" open data-nota-hechos-bloque>
+                <summary data-nota-hechos-titulo></summary>
+                <ul class="nota-elementos" data-nota-hechos></ul>
+            </details>
+            <div class="nota-lista-acciones">
+                <button type="button" class="enlace-accion" data-nota-desmarcar>Desmarcar todo</button>
+                <button type="button" class="enlace-boton" data-nota-limpiar>Borrar tachados</button>
+            </div>
+        </div>
+        <div class="nota-pie">
+            <label class="field nota-compartir" data-nota-grupo hidden>
+                <span>Compartir con</span>
+                <select class="input" data-nota-grupo-select></select>
+            </label>
+            <span class="nota-estado" role="status" data-nota-estado></span>
+            <div class="nota-pie-botones">
+                <button type="button" class="btn btn-ghost" data-nota-fijar>📌 Fijar</button>
+                <button type="button" class="btn btn-danger" data-nota-borrar>Borrar</button>
+                <button type="button" class="btn btn-primary" data-cerrar>Hecho</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

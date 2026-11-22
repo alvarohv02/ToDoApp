@@ -2203,6 +2203,527 @@ function vigilarSesion() {
   };
 }
 
+// --- Notas ---------------------------------------------------------------------------------
+// De texto libre o listas cuyos elementos se tachan al pulsarlos (como la lista de la compra).
+
+const API_NOTAS = '/api/notas';
+
+async function peticionNota(url, opciones = {}) {
+  const response = await fetch(url, { ...opciones, headers: { 'Content-Type': 'application/json' } });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'No se pudo guardar la nota');
+  }
+  return response.status === 204 ? null : response.json();
+}
+
+// "2026-11-22 18:05:00" (UTC, de SQLite) -> "22 nov" o "hoy, 19:05"
+function fechaNota(texto) {
+  const fecha = new Date(`${String(texto || '').replace(' ', 'T')}Z`);
+  if (Number.isNaN(fecha.getTime())) {
+    return '';
+  }
+  const hoy = new Date();
+  if (fecha.toDateString() === hoy.toDateString()) {
+    return `hoy, ${fecha.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  return fecha.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: fecha.getFullYear() === hoy.getFullYear() ? undefined : 'numeric' });
+}
+
+function renderizarNotas() {
+  const raiz = document.querySelector('[data-notas]');
+  if (!raiz) {
+    return;
+  }
+
+  const lista = raiz.querySelector('[data-notas-lista]');
+  const vacio = raiz.querySelector('[data-notas-vacio]');
+  const errorGeneral = raiz.querySelector('[data-notas-error]');
+  const buscador = raiz.querySelector('[data-notas-buscar]');
+  const modalTipo = document.querySelector('[data-nota-tipo-modal]');
+  const editor = document.querySelector('[data-nota-editor]');
+  const campoTitulo = editor.querySelector('[data-nota-titulo]');
+  const campoTexto = editor.querySelector('[data-nota-texto]');
+  const bloqueLista = editor.querySelector('[data-nota-lista-editor]');
+  const formAnadir = editor.querySelector('[data-nota-anadir]');
+  const campoElemento = editor.querySelector('[data-nota-elemento]');
+  const listaPendientes = editor.querySelector('[data-nota-pendientes]');
+  const bloqueHechos = editor.querySelector('[data-nota-hechos-bloque]');
+  const tituloHechos = editor.querySelector('[data-nota-hechos-titulo]');
+  const listaHechos = editor.querySelector('[data-nota-hechos]');
+  const campoGrupo = editor.querySelector('[data-nota-grupo]');
+  const selectGrupo = editor.querySelector('[data-nota-grupo-select]');
+  const estado = editor.querySelector('[data-nota-estado]');
+  const botonFijar = editor.querySelector('[data-nota-fijar]');
+
+  let notas = [];
+  let abierta = null;        // nota que se está editando
+  let temporizador = null;   // guardado del texto mientras se escribe
+  let guardando = Promise.resolve();
+
+  function mostrarError(mensaje) {
+    errorGeneral.textContent = mensaje || '';
+    errorGeneral.hidden = !mensaje;
+    estado.textContent = mensaje ? `⚠️ ${mensaje}` : estado.textContent;
+  }
+
+  function actualizarEnLista(nota) {
+    const indice = notas.findIndex((n) => n.id === nota.id);
+    if (indice === -1) {
+      notas.unshift(nota);
+    } else {
+      notas[indice] = nota;
+    }
+    if (abierta && abierta.id === nota.id) {
+      abierta = nota;
+    }
+  }
+
+  function coincide(nota, busqueda) {
+    if (!busqueda) {
+      return true;
+    }
+    const texto = [nota.titulo, nota.contenido, ...nota.elementos.map((e) => e.texto)].join('\n').toLocaleLowerCase('es');
+    return texto.includes(busqueda);
+  }
+
+  function ordenar() {
+    notas.sort((a, b) => (b.fijada - a.fijada) || String(b.actualizado_en).localeCompare(String(a.actualizado_en)) || b.id - a.id);
+  }
+
+  // --- Tarjetas ---------------------------------------------------------------------------
+  function pintar() {
+    ordenar();
+    const busqueda = buscador.value.trim().toLocaleLowerCase('es');
+    const visibles = notas.filter((nota) => coincide(nota, busqueda));
+    lista.replaceChildren(...visibles.map(tarjeta));
+    vacio.hidden = visibles.length > 0;
+    vacio.textContent = notas.length
+      ? 'Ninguna nota coincide con la búsqueda.'
+      : 'Aún no tienes notas. Pulsa «+ Nueva nota» para crear una de texto o una lista.';
+  }
+
+  function tarjeta(nota) {
+    const caja = document.createElement('article');
+    caja.className = `nota-tarjeta es-${nota.tipo}`;
+    caja.tabIndex = 0;
+    caja.title = 'Pulsa para abrir la nota';
+    caja.addEventListener('click', () => abrir(nota.id));
+    caja.addEventListener('keydown', (evento) => {
+      if (evento.key === 'Enter' && evento.target === caja) {
+        abrir(nota.id);
+      }
+    });
+
+    const cabecera = document.createElement('header');
+    cabecera.className = 'nota-tarjeta-cabecera';
+    const titulo = document.createElement('h2');
+    titulo.className = 'nota-tarjeta-titulo';
+    titulo.textContent = nota.titulo || (nota.tipo === 'lista' ? 'Lista sin título' : 'Nota sin título');
+    cabecera.append(titulo);
+    if (nota.fijada) {
+      const fijada = document.createElement('span');
+      fijada.className = 'nota-fijada';
+      fijada.title = 'Fijada';
+      fijada.textContent = '📌';
+      cabecera.append(fijada);
+    }
+    caja.append(cabecera);
+
+    if (nota.tipo === 'texto') {
+      const texto = document.createElement('p');
+      texto.className = 'nota-tarjeta-texto';
+      texto.textContent = nota.contenido || 'Vacía';
+      texto.classList.toggle('es-vacia', !nota.contenido);
+      caja.append(texto);
+    } else {
+      // Primero lo que falta; se puede tachar desde aquí mismo, sin abrir la lista
+      const pendientes = nota.elementos.filter((e) => !e.hecho);
+      const hechos = nota.elementos.filter((e) => e.hecho);
+      const muestra = [...pendientes, ...hechos].slice(0, 8);
+      const ul = document.createElement('ul');
+      ul.className = 'nota-tarjeta-lista';
+      muestra.forEach((elemento) => {
+        const li = document.createElement('li');
+        const boton = document.createElement('button');
+        boton.type = 'button';
+        boton.className = `nota-check${elemento.hecho ? ' is-hecho' : ''}`;
+        boton.setAttribute('aria-pressed', String(elemento.hecho));
+        boton.textContent = elemento.texto;
+        boton.title = elemento.hecho ? 'Pulsa para desmarcar' : 'Pulsa para tachar';
+        boton.addEventListener('click', (evento) => {
+          evento.stopPropagation();
+          tachar(nota, elemento);
+        });
+        li.append(boton);
+        ul.append(li);
+      });
+      if (!nota.elementos.length) {
+        const li = document.createElement('li');
+        li.className = 'nota-tarjeta-vacia';
+        li.textContent = 'Lista vacía';
+        ul.append(li);
+      }
+      caja.append(ul);
+      if (nota.elementos.length > muestra.length) {
+        const mas = document.createElement('p');
+        mas.className = 'nota-tarjeta-mas';
+        mas.textContent = `+ ${nota.elementos.length - muestra.length} más`;
+        caja.append(mas);
+      }
+    }
+
+    const pie = document.createElement('footer');
+    pie.className = 'nota-tarjeta-pie';
+    if (nota.tipo === 'lista' && nota.elementos.length) {
+      const progreso = document.createElement('span');
+      progreso.className = 'nota-progreso';
+      progreso.textContent = `☑️ ${nota.elementos.filter((e) => e.hecho).length}/${nota.elementos.length}`;
+      pie.append(progreso);
+    }
+    if (nota.grupo_id) {
+      pie.append(etiquetaGrupo(nota.grupo_id));
+    }
+    const fecha = document.createElement('span');
+    fecha.className = 'nota-fecha';
+    fecha.textContent = fechaNota(nota.actualizado_en);
+    pie.append(fecha);
+    caja.append(pie);
+    return caja;
+  }
+
+  // --- Cargar ------------------------------------------------------------------------------
+  async function cargar() {
+    try {
+      const [datos] = await Promise.all([peticionNota(API_NOTAS), cargarGrupos()]);
+      notas = Array.isArray(datos) ? datos : [];
+      mostrarError('');
+    } catch (error) {
+      mostrarError('No se pudieron cargar las notas.');
+    }
+    pintar();
+  }
+
+  // --- Crear: primero se elige el tipo ----------------------------------------------------
+  raiz.querySelector('[data-nota-nueva]').addEventListener('click', () => {
+    modalTipo.hidden = false;
+    modalTipo.querySelector('[data-tipo]').focus();
+  });
+
+  modalTipo.querySelectorAll('[data-tipo]').forEach((boton) => {
+    boton.addEventListener('click', async () => {
+      modalTipo.hidden = true;
+      try {
+        const nota = await peticionNota(API_NOTAS, { method: 'POST', body: JSON.stringify({ tipo: boton.dataset.tipo, titulo: '' }) });
+        actualizarEnLista(nota);
+        pintar();
+        abrir(nota.id, true);
+      } catch (error) {
+        mostrarError(error.message);
+      }
+    });
+  });
+
+  // --- Editor ------------------------------------------------------------------------------
+  function abrir(notaId, nueva = false) {
+    const nota = notas.find((n) => n.id === notaId);
+    if (!nota) {
+      return;
+    }
+    abierta = nota;
+    campoTitulo.value = nota.titulo;
+    campoTexto.value = nota.contenido;
+    campoTexto.hidden = nota.tipo !== 'texto';
+    bloqueLista.hidden = nota.tipo !== 'lista';
+    campoGrupo.hidden = !rellenarSelectorGrupo(selectGrupo, 'notas', nota.grupo_id || null);
+    estado.textContent = nota.grupo_id ? `Compartida con ${nombreGrupo(nota.grupo_id)}` : '';
+    pintarFijar();
+    pintarElementos();
+    editor.hidden = false;
+    document.body.classList.add('modal-abierto');
+    if (nueva) {
+      campoTitulo.focus();
+    }
+  }
+
+  function pintarFijar() {
+    botonFijar.textContent = abierta && abierta.fijada ? '📌 Desfijar' : '📌 Fijar';
+    botonFijar.setAttribute('aria-pressed', String(Boolean(abierta && abierta.fijada)));
+  }
+
+  function elementoEditable(elemento) {
+    const li = document.createElement('li');
+    li.className = `nota-elemento${elemento.hecho ? ' is-hecho' : ''}`;
+
+    const marca = document.createElement('button');
+    marca.type = 'button';
+    marca.className = 'nota-check';
+    marca.setAttribute('aria-pressed', String(elemento.hecho));
+    marca.textContent = elemento.texto;
+    marca.title = elemento.hecho ? 'Pulsa para desmarcar' : 'Pulsa para tachar';
+    marca.addEventListener('click', () => tachar(abierta, elemento));
+
+    const editar = document.createElement('button');
+    editar.type = 'button';
+    editar.className = 'icon-btn';
+    editar.title = 'Cambiar el texto';
+    editar.setAttribute('aria-label', `Cambiar «${elemento.texto}»`);
+    editar.textContent = '✏️';
+    editar.addEventListener('click', () => {
+      const campo = document.createElement('input');
+      campo.className = 'input nota-elemento-campo';
+      campo.value = elemento.texto;
+      campo.maxLength = 200;
+      let hecho = false;
+      const guardar = async (confirmar) => {
+        if (hecho) return;
+        hecho = true;
+        const texto = campo.value.trim();
+        if (confirmar && texto && texto !== elemento.texto) {
+          await operar(`${API_NOTAS}/${abierta.id}/elementos/${elemento.id}`, 'PUT', { texto });
+        }
+        pintarElementos();
+      };
+      campo.addEventListener('keydown', (evento) => {
+        if (evento.key === 'Enter') { evento.preventDefault(); guardar(true); }
+        if (evento.key === 'Escape') { evento.preventDefault(); evento.stopPropagation(); guardar(false); }
+      });
+      campo.addEventListener('blur', () => guardar(true));
+      marca.replaceWith(campo);
+      campo.focus();
+      campo.select();
+    });
+
+    const borrar = document.createElement('button');
+    borrar.type = 'button';
+    borrar.className = 'icon-btn delete';
+    borrar.title = 'Quitar de la lista';
+    borrar.setAttribute('aria-label', `Quitar «${elemento.texto}»`);
+    borrar.textContent = '✕';
+    borrar.addEventListener('click', () => operar(`${API_NOTAS}/${abierta.id}/elementos/${elemento.id}`, 'DELETE'));
+
+    li.append(marca, editar, borrar);
+    return li;
+  }
+
+  function pintarElementos() {
+    if (!abierta || abierta.tipo !== 'lista') {
+      return;
+    }
+    const pendientes = abierta.elementos.filter((e) => !e.hecho);
+    const hechos = abierta.elementos.filter((e) => e.hecho);
+    listaPendientes.replaceChildren(...pendientes.map(elementoEditable));
+    if (!pendientes.length) {
+      const li = document.createElement('li');
+      li.className = 'nota-tarjeta-vacia';
+      li.textContent = abierta.elementos.length ? '¡Todo hecho! 🎉' : 'Añade el primer elemento arriba.';
+      listaPendientes.append(li);
+    }
+    listaHechos.replaceChildren(...hechos.map(elementoEditable));
+    bloqueHechos.hidden = !hechos.length;
+    tituloHechos.textContent = `Tachados (${hechos.length})`;
+  }
+
+  // Cambios de una lista: el servidor devuelve la nota entera, así se ve lo que hayan hecho otros
+  async function operar(url, metodo, cuerpo) {
+    try {
+      const nota = await peticionNota(url, { method: metodo, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+      actualizarEnLista(nota);
+      mostrarError('');
+    } catch (error) {
+      mostrarError(error.message);
+    }
+    pintarElementos();
+    pintar();
+  }
+
+  function tachar(nota, elemento) {
+    elemento.hecho = !elemento.hecho;  // se ve al momento; luego llega lo que diga el servidor
+    if (abierta && abierta.id === nota.id) {
+      pintarElementos();
+    }
+    pintar();
+    operar(`${API_NOTAS}/${nota.id}/elementos/${elemento.id}`, 'PUT', { hecho: elemento.hecho });
+  }
+
+  formAnadir.addEventListener('submit', async (evento) => {
+    evento.preventDefault();
+    const texto = campoElemento.value;
+    if (!texto.trim() || !abierta) {
+      return;
+    }
+    campoElemento.value = '';
+    await operar(`${API_NOTAS}/${abierta.id}/elementos`, 'POST', { texto });
+    campoElemento.focus();  // para seguir apuntando cosas seguidas
+  });
+
+  // Pegar varias líneas (una lista copiada de otro sitio) añade un elemento por línea:
+  // el campo es de una sola línea y, si no, las juntaría todas
+  campoElemento.addEventListener('paste', (evento) => {
+    const pegado = (evento.clipboardData || window.clipboardData).getData('text');
+    if (!abierta || !/\r?\n/.test(pegado.trim())) {
+      return;
+    }
+    evento.preventDefault();
+    const delante = campoElemento.value.trim();
+    campoElemento.value = '';
+    operar(`${API_NOTAS}/${abierta.id}/elementos`, 'POST', { texto: delante ? `${delante}\n${pegado}` : pegado });
+  });
+
+  editor.querySelector('[data-nota-desmarcar]').addEventListener('click', () => {
+    if (abierta) operar(`${API_NOTAS}/${abierta.id}/desmarcar`, 'POST');
+  });
+  editor.querySelector('[data-nota-limpiar]').addEventListener('click', () => {
+    const tachados = abierta ? abierta.elementos.filter((e) => e.hecho).length : 0;
+    if (tachados && window.confirm(`¿Borrar los ${tachados} elementos tachados?`)) {
+      operar(`${API_NOTAS}/${abierta.id}/limpiar`, 'POST');
+    }
+  });
+
+  // Título y texto se guardan solos mientras se escribe
+  function programarGuardado() {
+    estado.textContent = 'Escribiendo…';
+    clearTimeout(temporizador);
+    temporizador = setTimeout(guardarTexto, 700);
+  }
+
+  function guardarTexto() {
+    clearTimeout(temporizador);
+    temporizador = null;
+    const nota = abierta;
+    if (!nota) {
+      return guardando;
+    }
+    const cambios = { titulo: campoTitulo.value };
+    if (nota.tipo === 'texto') {
+      cambios.contenido = campoTexto.value;
+    }
+    if (cambios.titulo === nota.titulo && (nota.tipo !== 'texto' || cambios.contenido === nota.contenido)) {
+      estado.textContent = 'Guardada';
+      return guardando;
+    }
+    estado.textContent = 'Guardando…';
+    guardando = guardando.then(async () => {
+      try {
+        const guardada = await peticionNota(`${API_NOTAS}/${nota.id}`, { method: 'PUT', body: JSON.stringify(cambios) });
+        // Si se ha seguido escribiendo, no se pisa lo que hay en pantalla
+        if (abierta && abierta.id === guardada.id) {
+          abierta.titulo = guardada.titulo;
+          abierta.contenido = guardada.contenido;
+          abierta.actualizado_en = guardada.actualizado_en;
+        } else {
+          actualizarEnLista(guardada);
+        }
+        estado.textContent = temporizador ? 'Escribiendo…' : 'Guardada ✓';
+        mostrarError('');
+      } catch (error) {
+        mostrarError(error.message);
+      }
+    });
+    return guardando;
+  }
+
+  campoTitulo.addEventListener('input', programarGuardado);
+  campoTexto.addEventListener('input', programarGuardado);
+  campoTitulo.addEventListener('keydown', (evento) => {
+    if (evento.key === 'Enter') {
+      evento.preventDefault();
+      (abierta && abierta.tipo === 'lista' ? campoElemento : campoTexto).focus();
+    }
+  });
+
+  selectGrupo.addEventListener('change', async () => {
+    const nota = abierta;
+    const grupoId = selectGrupo.value ? Number(selectGrupo.value) : null;
+    try {
+      const guardada = await peticionNota(`${API_NOTAS}/${nota.id}`, { method: 'PUT', body: JSON.stringify({ grupo_id: grupoId }) });
+      actualizarEnLista({ ...guardada, titulo: campoTitulo.value, contenido: nota.tipo === 'texto' ? campoTexto.value : guardada.contenido });
+      estado.textContent = grupoId ? `Compartida con ${nombreGrupo(grupoId)}` : 'Solo para ti';
+      mostrarError('');
+    } catch (error) {
+      selectGrupo.value = nota.grupo_id ? String(nota.grupo_id) : '';
+      mostrarError(error.message);
+    }
+    pintar();
+  });
+
+  botonFijar.addEventListener('click', async () => {
+    const nota = abierta;
+    try {
+      const guardada = await peticionNota(`${API_NOTAS}/${nota.id}`, { method: 'PUT', body: JSON.stringify({ fijada: !nota.fijada }) });
+      nota.fijada = guardada.fijada;
+      nota.actualizado_en = guardada.actualizado_en;
+      pintarFijar();
+      pintar();
+    } catch (error) {
+      mostrarError(error.message);
+    }
+  });
+
+  editor.querySelector('[data-nota-borrar]').addEventListener('click', async () => {
+    const nota = abierta;
+    const nombre = campoTitulo.value.trim() || (nota.tipo === 'lista' ? 'esta lista' : 'esta nota');
+    const aviso = nota.grupo_id ? ` Se borrará para todo el grupo ${nombreGrupo(nota.grupo_id)}.` : '';
+    if (!window.confirm(`¿Borrar «${nombre}»?${aviso}`)) {
+      return;
+    }
+    clearTimeout(temporizador);
+    temporizador = null;
+    try {
+      await peticionNota(`${API_NOTAS}/${nota.id}`, { method: 'DELETE' });
+      notas = notas.filter((n) => n.id !== nota.id);
+      cerrarEditor(false);
+    } catch (error) {
+      mostrarError(error.message);
+    }
+  });
+
+  async function cerrarEditor(guardar = true) {
+    const nota = abierta;
+    if (guardar && nota) {
+      await guardarTexto();
+      // Una nota recién creada que se cierra sin escribir nada no se guarda
+      const vacia = !campoTitulo.value.trim() && (nota.tipo === 'texto' ? !campoTexto.value.trim() : !nota.elementos.length);
+      if (vacia) {
+        await peticionNota(`${API_NOTAS}/${nota.id}`, { method: 'DELETE' }).catch(() => {});
+        notas = notas.filter((n) => n.id !== nota.id);
+      }
+    }
+    abierta = null;
+    editor.hidden = true;
+    document.body.classList.remove('modal-abierto');
+    pintar();
+  }
+
+  editor.querySelectorAll('[data-cerrar]').forEach((boton) => boton.addEventListener('click', () => cerrarEditor()));
+  modalTipo.querySelectorAll('[data-cerrar]').forEach((boton) => boton.addEventListener('click', () => { modalTipo.hidden = true; }));
+  editor.addEventListener('click', (evento) => {
+    if (evento.target === editor) cerrarEditor();
+  });
+  modalTipo.addEventListener('click', (evento) => {
+    if (evento.target === modalTipo) modalTipo.hidden = true;
+  });
+  document.addEventListener('keydown', (evento) => {
+    if (evento.key !== 'Escape') return;
+    if (!modalTipo.hidden) modalTipo.hidden = true;
+    else if (!editor.hidden) cerrarEditor();
+  });
+
+  buscador.addEventListener('input', pintar);
+
+  // Al volver a la página se recargan, por si alguien del grupo ha cambiado una lista
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !abierta) {
+      cargar();
+    }
+  });
+  window.addEventListener('beforeunload', () => {
+    if (temporizador) guardarTexto();
+  });
+
+  cargar();
+}
+
 function iniciarAppInstalable() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -2218,7 +2739,7 @@ function iniciarAppInstalable() {
       ocultaDesde = Date.now();
       return;
     }
-    const enFormulario = document.querySelector('.modal, input:focus, textarea:focus, select:focus');
+    const enFormulario = document.querySelector('.modal-overlay:not([hidden]) .modal, input:focus, textarea:focus, select:focus');
     if (ocultaDesde && Date.now() - ocultaDesde > 5 * 60 * 1000 && !enFormulario) {
       window.location.reload();
     }
@@ -2235,6 +2756,7 @@ function iniciarAplicacion() {
   renderizarCalendario();
   renderizarRecordatorios();
   renderizarCorreos();
+  renderizarNotas();
 }
 
 if (document.readyState === 'loading') {

@@ -89,6 +89,11 @@ def recordatorios():
     return render_template('./recordatorios.html')
 
 
+@app.route('/notas')
+def notas():
+    return render_template('./notas.html')
+
+
 @app.route('/correos')
 def correos():
     return render_template('./correos.html')
@@ -371,6 +376,64 @@ def carpeta_api(carpeta_id):
     if carpeta is None:
         return jsonify({'error': 'Carpeta no encontrada'}), 404
     return jsonify(carpeta)
+
+
+# --- Notas (texto libre o listas que se tachan) ---------------------------------------------
+
+def _datos_json():
+    datos = request.get_json(silent=True)
+    return datos if isinstance(datos, dict) else {}
+
+
+def _respuesta_nota(funcion, *argumentos, estado=200):
+    """Llama a la función de db y devuelve la nota en JSON (404 si no existe, 400 si los datos no valen)."""
+    try:
+        nota = funcion(*argumentos)
+    except db.DatosNoValidos as error:
+        return jsonify({'error': error.mensaje}), 400
+    if nota is None:
+        return jsonify({'error': 'Nota no encontrada'}), 404
+    return jsonify(nota), estado
+
+
+@app.route('/api/notas', methods=['GET', 'POST'])
+def notas_api():
+    if request.method == 'GET':
+        return jsonify(db.listar_notas())
+    return _respuesta_nota(db.crear_nota, _datos_json(), estado=201)
+
+
+@app.route('/api/notas/<int:nota_id>', methods=['PUT', 'DELETE'])
+def nota_api(nota_id):
+    if request.method == 'DELETE':
+        if not db.borrar_nota(nota_id):
+            return jsonify({'error': 'Nota no encontrada'}), 404
+        return '', 204
+    datos = {k: v for k, v in _datos_json().items() if k in ('titulo', 'contenido', 'fijada', 'grupo_id')}
+    return _respuesta_nota(db.cambiar_nota, nota_id, datos)
+
+
+@app.route('/api/notas/<int:nota_id>/elementos', methods=['POST'])
+def nota_elementos_api(nota_id):
+    datos = _datos_json()
+    textos = datos['textos'] if isinstance(datos.get('textos'), list) else [datos.get('texto')]
+    return _respuesta_nota(db.anadir_elementos, nota_id, textos, estado=201)
+
+
+@app.route('/api/notas/<int:nota_id>/elementos/<int:elemento_id>', methods=['PUT', 'DELETE'])
+def nota_elemento_api(nota_id, elemento_id):
+    if request.method == 'DELETE':
+        return _respuesta_nota(db.borrar_elemento, nota_id, elemento_id)
+    datos = {k: v for k, v in _datos_json().items() if k in ('texto', 'hecho')}
+    return _respuesta_nota(db.cambiar_elemento, nota_id, elemento_id, datos)
+
+
+@app.route('/api/notas/<int:nota_id>/<accion>', methods=['POST'])
+def nota_accion_api(nota_id, accion):
+    """desmarcar (quitar todas las tachaduras) o limpiar (borrar lo tachado) en una lista."""
+    if accion not in ('desmarcar', 'limpiar'):
+        return jsonify({'error': 'Acción no válida'}), 404
+    return _respuesta_nota(db.ordenar_lista, nota_id, accion)
 
 
 @app.route('/api/tareas/<task_id>', methods=['PUT', 'DELETE'])

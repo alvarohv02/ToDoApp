@@ -189,6 +189,36 @@ def init_db():
         connection.execute('DELETE FROM tarea_carpetas WHERE tarea_id NOT IN (SELECT id FROM tareas) '
                            'OR carpeta_id NOT IN (SELECT id FROM carpetas)')
 
+        # Notas: de texto libre (contenido) o listas (nota_elementos, que se tachan al pulsarlos).
+        # Como las tareas, son de quien las crea o de un grupo (grupo_id)
+        connection.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS notas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario_id INTEGER,
+                grupo_id INTEGER,
+                titulo TEXT NOT NULL DEFAULT '',
+                tipo TEXT NOT NULL DEFAULT 'texto',
+                contenido TEXT NOT NULL DEFAULT '',
+                fijada INTEGER NOT NULL DEFAULT 0,
+                creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            '''
+        )
+        connection.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS nota_elementos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nota_id INTEGER NOT NULL REFERENCES notas(id) ON DELETE CASCADE,
+                texto TEXT NOT NULL,
+                hecho INTEGER NOT NULL DEFAULT 0,
+                orden INTEGER NOT NULL DEFAULT 0
+            )
+            '''
+        )
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_nota_elementos ON nota_elementos (nota_id, orden)')
+
         # Usuarios de la web. La contraseña se guarda solo como hash (scrypt con sal, de Werkzeug).
         # chats: sus chats del bot ("34600111222,tg:123456789"), para saber de quién es cada mensaje.
         # version_sesion: al cambiarla se cierran todas sus sesiones abiertas
@@ -264,6 +294,11 @@ def init_db():
             )
             '''
         )
+
+        if not connection.execute("SELECT 1 FROM ajustes WHERE clave = 'grupos_con_notas'").fetchone():
+            connection.execute("UPDATE grupos SET comparte = comparte || ',notas' "
+                               "WHERE (',' || comparte || ',') NOT LIKE '%,notas,%'")
+            connection.execute("INSERT INTO ajustes (clave, valor) VALUES ('grupos_con_notas', '1')")
 
         # La persona por defecto es el nombre de cada usuario. Las tareas de antes con la de por defecto
         # ("Sin asignar", o PERSONA_POR_DEFECTO del .env en las del administrador) pasan a llevar el de su dueño
@@ -655,6 +690,200 @@ def _poner_en_carpeta(connection, tarea_id, carpeta_id, grupo_id):
     if fila and not fila['grupo_id']:
         connection.execute('INSERT INTO tarea_carpetas (tarea_id, usuario_id, carpeta_id) VALUES (?, ?, ?)',
                            (tarea_id, _id_carpetas(), carpeta_id))
+
+
+# --- Notas --------------------------------------------------------------------------------
+# De texto libre o listas (como la de la compra) cuyos elementos se tachan al pulsarlos.
+# Se ven y se cambian igual que las tareas: las del usuario y las compartidas en sus grupos.
+
+TIPOS_NOTA = ('texto', 'lista')
+MAX_NOTAS = 500
+MAX_ELEMENTOS = 300
+MAX_TITULO_NOTA = 80
+MAX_CONTENIDO_NOTA = 20000
+MAX_ELEMENTO = 200
+
+
+def _elementos_de(connection, nota_ids):
+    elementos = {i: [] for i in nota_ids}
+    if nota_ids:
+        filas = connection.execute(
+            f'SELECT id, nota_id, texto, hecho FROM nota_elementos WHERE nota_id IN ({",".join("?" * len(nota_ids))}) '
+            'ORDER BY orden, id', list(nota_ids)).fetchall()
+        for fila in filas:
+            elementos[fila['nota_id']].append({'id': fila['id'], 'texto': fila['texto'], 'hecho': bool(fila['hecho'])})
+    return elementos
+
+
+def _nota_a_dict(fila, elementos):
+    nota = dict(fila)
+    nota['fijada'] = bool(nota['fijada'])
+    nota['elementos'] = elementos if nota['tipo'] == 'lista' else []
+    return nota
+
+
+def listar_notas():
+    """Las notas que ve el usuario actual: fijadas primero y luego las cambiadas más recientemente."""
+    condicion, parametros = _filtro_dueno('notas')
+    with get_db_connection() as connection:
+        filas = connection.execute(
+            f'SELECT id, titulo, tipo, contenido, fijada, grupo_id, usuario_id, creado_en, actualizado_en FROM notas '
+            f'WHERE {condicion} ORDER BY fijada DESC, actualizado_en DESC, id DESC', parametros).fetchall()
+        elementos = _elementos_de(connection, [f['id'] for f in filas])
+    return [_nota_a_dict(f, elementos[f['id']]) for f in filas]
+
+
+def obtener_nota(nota_id):
+    condicion, parametros = _filtro_dueno('notas')
+    with get_db_connection() as connection:
+        fila = connection.execute(
+            f'SELECT id, titulo, tipo, contenido, fijada, grupo_id, usuario_id, creado_en, actualizado_en FROM notas '
+            f'WHERE id = ? AND {condicion}', (nota_id, *parametros)).fetchone()
+        if fila is None:
+            return None
+        return _nota_a_dict(fila, _elementos_de(connection, [fila['id']])[fila['id']])
+
+
+def _texto_nota(valor, maximo, que):
+    texto = (valor or '') if isinstance(valor, str) else ''
+    if len(texto) > maximo:
+        raise DatosNoValidos(f'{que} es demasiado largo (máximo {maximo} caracteres)')
+    return texto
+
+
+def crear_nota(datos):
+    tipo = datos.get('tipo')
+    if tipo not in TIPOS_NOTA:
+        raise DatosNoValidos('Elige si la nota es de texto libre o una lista')
+    titulo = _texto_nota(datos.get('titulo'), MAX_TITULO_NOTA, 'El título').strip()
+    contenido = _texto_nota(datos.get('contenido'), MAX_CONTENIDO_NOTA, 'El texto') if tipo == 'texto' else ''
+    grupo_id = comprobar_grupo('notas', datos.get('grupo_id'))
+    condicion, parametros = _filtro_dueno('notas')
+    with get_db_connection() as connection:
+        if connection.execute(f'SELECT COUNT(*) FROM notas WHERE {condicion}', parametros).fetchone()[0] >= MAX_NOTAS:
+            raise DatosNoValidos(f'Como mucho puedes tener {MAX_NOTAS} notas')
+        cursor = connection.execute(
+            'INSERT INTO notas (usuario_id, grupo_id, titulo, tipo, contenido) VALUES (?, ?, ?, ?, ?)',
+            (id_dueno(), grupo_id, titulo, tipo, contenido))
+        connection.commit()
+    return obtener_nota(cursor.lastrowid)
+
+
+def cambiar_nota(nota_id, datos):
+    """Cambia título, texto, si está fijada o con quién se comparte. None si no existe (o no la ve)."""
+    nota = obtener_nota(nota_id)
+    if nota is None:
+        return None
+    titulo = _texto_nota(datos['titulo'], MAX_TITULO_NOTA, 'El título').strip() if 'titulo' in datos else nota['titulo']
+    contenido = nota['contenido']
+    if 'contenido' in datos and nota['tipo'] == 'texto':
+        contenido = _texto_nota(datos['contenido'], MAX_CONTENIDO_NOTA, 'El texto')
+    fijada = bool(datos['fijada']) if 'fijada' in datos else nota['fijada']
+    grupo_id = comprobar_grupo('notas', datos.get('grupo_id'), nota) if 'grupo_id' in datos else nota['grupo_id']
+    with get_db_connection() as connection:
+        connection.execute(
+            'UPDATE notas SET titulo = ?, contenido = ?, fijada = ?, grupo_id = ?, actualizado_en = CURRENT_TIMESTAMP '
+            'WHERE id = ?', (titulo, contenido, int(fijada), grupo_id, nota_id))
+        connection.commit()
+    return obtener_nota(nota_id)
+
+
+def borrar_nota(nota_id):
+    if obtener_nota(nota_id) is None:
+        return False
+    with get_db_connection() as connection:
+        connection.execute('DELETE FROM nota_elementos WHERE nota_id = ?', (nota_id,))
+        connection.execute('DELETE FROM notas WHERE id = ?', (nota_id,))
+        connection.commit()
+    return True
+
+
+def _lista(nota_id):
+    nota = obtener_nota(nota_id)
+    if nota is None or nota['tipo'] != 'lista':
+        return None
+    return nota
+
+
+def _tocar_nota(connection, nota_id):
+    connection.execute('UPDATE notas SET actualizado_en = CURRENT_TIMESTAMP WHERE id = ?', (nota_id,))
+
+
+def anadir_elementos(nota_id, textos):
+    """Añade elementos al final de una lista (uno por línea si se pega varios). None si no es una lista suya."""
+    nota = _lista(nota_id)
+    if nota is None:
+        return None
+    nuevos = [t.strip() for texto in textos for t in str(texto or '').splitlines() if t.strip()]
+    if not nuevos:
+        raise DatosNoValidos('Escribe algo para añadir a la lista')
+    if any(len(t) > MAX_ELEMENTO for t in nuevos):
+        raise DatosNoValidos(f'Cada elemento puede tener como mucho {MAX_ELEMENTO} caracteres')
+    if len(nota['elementos']) + len(nuevos) > MAX_ELEMENTOS:
+        raise DatosNoValidos(f'Una lista puede tener como mucho {MAX_ELEMENTOS} elementos')
+    with get_db_connection() as connection:
+        orden = connection.execute('SELECT COALESCE(MAX(orden), 0) FROM nota_elementos WHERE nota_id = ?',
+                                   (nota_id,)).fetchone()[0]
+        for i, texto in enumerate(nuevos, start=1):
+            connection.execute('INSERT INTO nota_elementos (nota_id, texto, orden) VALUES (?, ?, ?)',
+                               (nota_id, texto, orden + i))
+        _tocar_nota(connection, nota_id)
+        connection.commit()
+    return obtener_nota(nota_id)
+
+
+def cambiar_elemento(nota_id, elemento_id, datos):
+    """Tacha/destacha (hecho) o cambia el texto de un elemento. None si no existe."""
+    nota = _lista(nota_id)
+    if nota is None or not any(e['id'] == elemento_id for e in nota['elementos']):
+        return None
+    cambios, parametros = [], []
+    if 'texto' in datos:
+        texto = str(datos['texto'] or '').strip()
+        if not texto:
+            raise DatosNoValidos('El elemento no puede quedar vacío')
+        if len(texto) > MAX_ELEMENTO:
+            raise DatosNoValidos(f'Cada elemento puede tener como mucho {MAX_ELEMENTO} caracteres')
+        cambios.append('texto = ?')
+        parametros.append(texto)
+    if 'hecho' in datos:
+        cambios.append('hecho = ?')
+        parametros.append(int(bool(datos['hecho'])))
+    if cambios:
+        with get_db_connection() as connection:
+            connection.execute(f'UPDATE nota_elementos SET {", ".join(cambios)} WHERE id = ? AND nota_id = ?',
+                               (*parametros, elemento_id, nota_id))
+            _tocar_nota(connection, nota_id)
+            connection.commit()
+    return obtener_nota(nota_id)
+
+
+def borrar_elemento(nota_id, elemento_id):
+    nota = _lista(nota_id)
+    if nota is None or not any(e['id'] == elemento_id for e in nota['elementos']):
+        return None
+    with get_db_connection() as connection:
+        connection.execute('DELETE FROM nota_elementos WHERE id = ? AND nota_id = ?', (elemento_id, nota_id))
+        _tocar_nota(connection, nota_id)
+        connection.commit()
+    return obtener_nota(nota_id)
+
+
+def ordenar_lista(nota_id, accion):
+    """'desmarcar': quita todas las tachaduras (para reutilizar la lista); 'limpiar': borra lo tachado."""
+    nota = _lista(nota_id)
+    if nota is None:
+        return None
+    with get_db_connection() as connection:
+        if accion == 'desmarcar':
+            connection.execute('UPDATE nota_elementos SET hecho = 0 WHERE nota_id = ?', (nota_id,))
+        elif accion == 'limpiar':
+            connection.execute('DELETE FROM nota_elementos WHERE nota_id = ? AND hecho = 1', (nota_id,))
+        else:
+            raise DatosNoValidos('Acción no válida')
+        _tocar_nota(connection, nota_id)
+        connection.commit()
+    return obtener_nota(nota_id)
 
 
 # --- WhatsApp -----------------------------------------------------------------
@@ -1227,6 +1456,9 @@ def borrar_usuario(usuario_id):
         connection.executemany('DELETE FROM evento_excepciones WHERE evento_id = ?', eventos)
         connection.execute('DELETE FROM eventos WHERE usuario_id = ? AND grupo_id IS NULL', (usuario_id,))
         connection.execute('DELETE FROM tareas WHERE usuario_id = ? AND grupo_id IS NULL', (usuario_id,))
+        connection.execute('DELETE FROM nota_elementos WHERE nota_id IN '
+                           '(SELECT id FROM notas WHERE usuario_id = ? AND grupo_id IS NULL)', (usuario_id,))
+        connection.execute('DELETE FROM notas WHERE usuario_id = ? AND grupo_id IS NULL', (usuario_id,))
         connection.executemany('DELETE FROM recordatorios WHERE destino = ?', [(c,) for c in usuario['chats']])
         connection.execute('DELETE FROM tarea_carpetas WHERE usuario_id = ?', (usuario_id,))
         # Sus carpetas personales; las de grupo se quedan en el grupo
@@ -1268,7 +1500,7 @@ def chats_ajenos(usuario_id):
 # Cada tarea, evento o recordatorio puede pertenecer a un grupo: entonces lo ven y lo cambian
 # todos sus miembros, siempre que el grupo comparta ese tipo de cosas.
 
-TIPOS_GRUPO = {'tareas': 'Tareas', 'eventos': 'Calendario', 'recordatorios': 'Recordatorios'}
+TIPOS_GRUPO = {'tareas': 'Tareas', 'eventos': 'Calendario', 'recordatorios': 'Recordatorios', 'notas': 'Notas'}
 _SUBCONSULTA_GRUPOS = (
     "grupo_id IN (SELECT m.grupo_id FROM grupo_miembros m JOIN grupos g ON g.id = m.grupo_id "
     "WHERE m.usuario_id = ? AND m.estado = 'miembro' AND (',' || g.comparte || ',') LIKE ?)"
@@ -1385,7 +1617,7 @@ def salir_de_grupo(grupo_id, usuario_id):
         quedan = connection.execute("SELECT COUNT(*) FROM grupo_miembros WHERE grupo_id = ? AND estado = 'miembro'",
                                     (grupo_id,)).fetchone()[0]
         if not quedan:
-            for tabla in ('tareas', 'eventos', 'recordatorios'):
+            for tabla in ('tareas', 'eventos', 'recordatorios', 'notas'):
                 connection.execute(f'UPDATE {tabla} SET grupo_id = NULL WHERE grupo_id = ?', (grupo_id,))
             connection.execute('UPDATE tareas SET carpeta_compartida = NULL WHERE carpeta_compartida IN '
                                '(SELECT id FROM carpetas WHERE grupo_id = ?)', (grupo_id,))
