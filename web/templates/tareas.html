@@ -91,6 +91,7 @@
                 <h2 class="column-title"><span class="column-dot"></span>{{ estado }}</h2>
                 <span class="column-count">{{ tareas.filter(t => t.status === estado).length }}</span>
             </header>
+            <div class="column-list">
             <article class="task" v-for="(tarea, i) in tareas.filter(t => t.status === estado)"
                      :key="tarea.id || tarea.nombre || i"
                      draggable="true" @dragstart="dragStart(tarea)" @dragend="dragEnd"
@@ -113,7 +114,20 @@
                 </div>
             </article>
             <p v-if="!tareas.some(t => t.status === estado)" class="column-empty">Suelta aquí una tarea</p>
+            </div>
         </section>
+    </div>
+
+    <!-- Mientras se arrastra: destinos fijos abajo, por si la otra columna no se ve en la pantalla -->
+    <div v-if="arrastrando && tareaArrastrando" class="drop-bar">
+        <span class="drop-bar-texto">Soltar en</span>
+        <div v-for="estado in ['Sin Empezar', 'En Curso', 'Terminado'].filter(e => e !== tareaArrastrando.status)"
+             :key="'zona-' + estado.replace(/\s+/g, '-')"
+             class="drop-zona" :class="['column-' + estado.toLowerCase().replace(/\s+/g, '-'), { activa: zonaActiva === estado }]"
+             @dragenter.prevent="zonaActiva = estado" @dragover.prevent="zonaActiva = estado"
+             @dragleave="zonaActiva = null" @drop.prevent="drop(estado)">
+            <span class="column-dot"></span>{{ estado }}
+        </div>
     </div>
 
     <div v-else class="card table-shell">

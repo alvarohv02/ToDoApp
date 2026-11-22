@@ -2891,3 +2891,86 @@ tbody tr:last-child td {
     line-height: 1;
     vertical-align: middle;
 }
+
+/* Tablero: con muchas tareas, cada columna se desplaza por dentro y el tablero cabe en la pantalla,
+   así siempre se ven las tres columnas para arrastrar de una a otra */
+.column-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    min-height: 0;
+}
+
+@media (min-width: 1081px) {
+    .board {
+        align-items: stretch;
+    }
+
+    .column {
+        max-height: max(420px, calc(100dvh - 2rem));
+    }
+
+    .column-list {
+        flex: 1;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        /* sitio para la sombra de las tarjetas y para que no se corten al pasar el ratón */
+        margin: -0.3rem -0.4rem;
+        padding: 0.3rem 0.4rem;
+    }
+}
+
+/* Barra de destinos mientras se arrastra una tarea */
+.drop-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 1.25rem;
+    z-index: 60;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    max-width: calc(100vw - 2rem);
+    padding: 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg, var(--shadow));
+    animation: drop-bar-entra 0.15s ease-out;
+}
+
+.drop-bar-texto {
+    padding: 0 0.3rem;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.drop-zona {
+    --c: var(--gris);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 9rem;
+    padding: 0.9rem 1.2rem;
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-weight: 700;
+    white-space: nowrap;
+    transition: border-color 0.12s, background 0.12s, transform 0.12s;
+}
+
+.drop-zona.activa {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    transform: scale(1.04);
+}
+
+.drop-zona * {
+    pointer-events: none;  /* que pasar por el texto no cuente como salir de la zona */
+}
+
+@keyframes drop-bar-entra {
+    from { opacity: 0; transform: translate(-50%, 0.6rem); }
+}

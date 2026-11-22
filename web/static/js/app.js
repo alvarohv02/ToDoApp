@@ -880,6 +880,8 @@ function renderizarVistaTareas() {
         vista: 'tablero',
         mostrarFormulario: false,
         tareaArrastrando: null,
+        arrastrando: false,
+        zonaActiva: null,
         menuAbierto: null,
         mostrarModal: false,
         tareaEditando: null,
@@ -992,10 +994,16 @@ function renderizarVistaTareas() {
 
       dragStart(tarea) {
         this.tareaArrastrando = tarea;
+        // La barra de destinos se muestra un instante después: cambiar la página justo al empezar
+        // a arrastrar hace que algunos navegadores cancelen el arrastre
+        setTimeout(() => { this.arrastrando = this.tareaArrastrando === tarea; }, 0);
       },
 
       dragEnd() {
         this.tareaArrastrando = null;
+        this.arrastrando = false;
+        this.zonaActiva = null;
+        document.querySelectorAll('.column').forEach((column) => column.classList.remove('highlight'));
       },
 
       dragOver(estado, event) {
@@ -1003,7 +1011,11 @@ function renderizarVistaTareas() {
       },
 
       async drop(estado) {
-        if (this.tareaArrastrando) {
+        this.arrastrando = false;
+        this.zonaActiva = null;
+        if (this.tareaArrastrando && this.tareaArrastrando.status === estado) {
+          this.tareaArrastrando = null;  // soltada en su misma columna: no hay nada que guardar
+        } else if (this.tareaArrastrando) {
           try {
             const tareaActualizada = await actualizarTarea({
               ...this.tareaArrastrando,
