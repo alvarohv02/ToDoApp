@@ -265,6 +265,20 @@ def init_db():
             '''
         )
 
+        # La persona por defecto es el nombre de cada usuario. Las tareas de antes con la de por defecto
+        # ("Sin asignar", o PERSONA_POR_DEFECTO del .env en las del administrador) pasan a llevar el de su dueño
+        admin = connection.execute('SELECT MIN(id) FROM usuarios WHERE es_admin = 1').fetchone()[0]
+        if admin is not None:
+            dueno = 'COALESCE(tareas.usuario_id, ?)'
+            connection.execute(
+                f"UPDATE tareas SET persona = (SELECT nombre FROM usuarios WHERE id = {dueno}) "
+                f"WHERE persona = 'Sin asignar' AND EXISTS (SELECT 1 FROM usuarios WHERE id = {dueno})", (admin, admin))
+            antigua = os.getenv('PERSONA_POR_DEFECTO', '').strip()
+            if antigua:
+                connection.execute(
+                    'UPDATE tareas SET persona = (SELECT nombre FROM usuarios WHERE id = ?) '
+                    'WHERE persona = ? AND (usuario_id = ? OR usuario_id IS NULL)', (admin, antigua, admin))
+
 
 def row_to_task(row):
     return {
@@ -328,18 +342,21 @@ def fetch_task(task_id):
 
 
 def persona_por_defecto():
-    """A quién se asigna una tarea si no se indica nadie.
+    """A quién se asigna una tarea si no se indica nadie: el nombre con el que se registró el usuario actual
+    (en los procesos de fondo, el del administrador principal).
 
-    Para el administrador, PERSONA_POR_DEFECTO del .env; para los demás usuarios, su propio nombre.
+    Solo sin usuarios todavía se usa PERSONA_POR_DEFECTO del .env.
     """
     usuario = _usuario.get()
-    if usuario and usuario['id'] != id_admin_principal():
+    if usuario is None and id_admin_principal() is not None:
+        usuario = obtener_usuario(id_admin_principal())
+    if usuario:
         return usuario['nombre']
     return os.getenv('PERSONA_POR_DEFECTO', '').strip() or 'Sin asignar'
 
 
 def es_persona_por_defecto(persona):
-    """True si no merece la pena mostrar la persona (sin asignar o la de por defecto)."""
+    """True si no merece la pena mostrar la persona (sin asignar o el propio usuario)."""
     return not persona or persona in ('Sin asignar', persona_por_defecto())
 
 

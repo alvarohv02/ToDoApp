@@ -170,7 +170,7 @@ def _recortar(original, inicio, fin):
 
 
 def _persona(texto):
-    """Nombre de persona tal como se guarda: "a mí", "yo"... es la persona por defecto ("Yo")."""
+    """Nombre de persona tal como se guarda: "a mí", "yo"... es quien escribe (su nombre)."""
     if normalizar(texto).strip() in ('yo', 'mi', 'me', 'mio', 'mia', 'nosotros'):
         import db  # se importa aquí: el motor de reglas no necesita la base de datos para nada más
         return db.persona_por_defecto()

@@ -1,5 +1,5 @@
 const API_TASKS_URL = '/api/tareas';
-// A quién se asignan las tareas si no se indica nadie (PERSONA_POR_DEFECTO del .env)
+// A quién se asignan las tareas si no se indica nadie: el nombre del usuario que ha iniciado sesión
 const PERSONA_DEFECTO = (document.querySelector('meta[name="persona-defecto"]') || {}).content || 'Sin asignar';
 
 function esPersonaDefecto(persona) {
