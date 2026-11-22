@@ -16,7 +16,7 @@
 """
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 import logging
 import os
 import re
@@ -204,10 +204,17 @@ def _soltar_usuario(_error=None):
 
 
 def _destino_seguro(siguiente):
-    """Solo rutas de esta web ("/tareas"), nunca otra web ("//malo.com" o "https://...")."""
-    if not siguiente or not siguiente.startswith('/') or siguiente.startswith('//') or '\\' in siguiente:
+    """Solo rutas de esta web ("/tareas"), nunca otra web ("//malo.com", "https://..." o "/<tab>/malo.com").
+
+    Los navegadores ignoran tabuladores y saltos de línea dentro de una URL, así que se rechaza
+    cualquier carácter de control y se devuelve la ruta ya interpretada, no el texto recibido.
+    """
+    if not siguiente or '\\' in siguiente or any(ord(c) < 32 or ord(c) == 127 for c in siguiente):
         return '/'
-    return siguiente
+    partes = urlsplit(siguiente)
+    if partes.scheme or partes.netloc or not partes.path.startswith('/') or partes.path.startswith('//'):
+        return '/'
+    return urlunsplit(('', '', partes.path, partes.query, ''))
 
 
 # --- Páginas ----------------------------------------------------------------------------
