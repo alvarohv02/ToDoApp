@@ -89,7 +89,8 @@ CAMBIAR_IMPORTANCIA = [
     re.compile(rf'^{_OBJETO}(?P<objeto>.+?)\s+es\s+(?:muy\s+)?{_NIVEL}' + _FIN),
 ]
 ASIGNAR = [
-    re.compile(rf'^(?:asigna|asignar|asignale|pasale|pasa|pasar|dale|encarga|encargale)\s+{_OBJETO}(?P<objeto>.+?)\s+a\s+(?P<persona>[a-z]+)' + _FIN),
+    re.compile(rf'^(?:asigna|asignar|asignale|pasale|pasa|pasar|dale|encarga|encargale)\s+{_OBJETO}(?P<objeto>.+?)\s+a\s+'
+               r'(?P<persona>[a-z]+(?:\s+(?!(?:a|al|de|del|y|e)\b)[a-z]+){0,2})' + _FIN),
     re.compile(rf'^(?P<persona>[a-z]+)\s+se\s+(?:encarga|ocupa)\s+de\s+{_OBJETO}(?P<objeto>.+?)' + _FIN),
 ]
 
@@ -123,13 +124,17 @@ PERSONA = re.compile(r'(?:,\s*)?\b(?:asignad[oa]s?\s+a|asignal[oa]\s+a|encargad[
 _NO_PERSONA = (r'el|la|los|las|hoy|manana|pasado|esta|este|esa|ese|antes|despues|cuando|lunes|martes|miercoles|'
                r'jueves|viernes|sabado|domingo|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|'
                r'octubre|noviembre|diciembre|que|ya|luego')
-PERSONA_PARA = re.compile(rf',\s*para\s+(?!(?:{_NO_PERSONA})\b)([a-z]+)\s*(?=,|$)')
+PERSONA_PARA = re.compile(rf',\s*para\s+(?!(?:{_NO_PERSONA})\b)(\w+(?:\s+\w+){{0,2}}?)\s*(?=,|$)')
 
 # Dónde termina el valor de una carpeta o un grupo dicho en una frase: en una coma, al final o al
 # empezar otro dato ("carpeta Universidad para el viernes, importancia alta")
 _FIN_VALOR = (r'(?=\s*(?:[,;]|$|\s+(?:para|con|el|la|los|las|a\s+las|hoy|manana|pasado|esta|este|'
               r'importancia|prioridad|asignad[oa]s?|encargad[oa]s?|responsable|persona|grupo|carpeta|compartid[oa]s?|'
-              r'urgente|importante|sin\s+prisa)\b))')
+              r'urgente|importante|sin\s+prisa|en)\b))')
+# El encargado con nombre y apellidos ("encargada Lucía Gómez"), hasta la siguiente coma o dato; si no
+# encaja así ("encargado Pedro en 2 semanas"), PERSONA se queda con la primera palabra
+_INICIO_PERSONA = PERSONA.pattern[:PERSONA.pattern.rindex('(')]
+PERSONA_LARGA = re.compile(_INICIO_PERSONA + r'(\w+(?:\s+\w+){0,2}?)' + _FIN_VALOR)
 # "en la carpeta Universidad", "carpeta: Casa", "#uni"
 CARPETA = [
     re.compile(r'(?:,\s*)?\b(?:(?:en|a|dentro\s+de)\s+(?:la\s+|mi\s+)?carpeta(?:\s+de)?|carpeta)\s*:?\s+(?P<valor>.+?)' + _FIN_VALOR),
@@ -227,7 +232,8 @@ def _persona(texto):
     if normalizar(texto).strip() in ('yo', 'mi', 'me', 'mio', 'mia', 'nosotros'):
         import db  # se importa aquí: el motor de reglas no necesita la base de datos para nada más
         return db.persona_por_defecto()
-    return texto.strip().capitalize()
+    # "lucía gómez" -> "Lucía Gómez" (capitalize() dejaría "Lucía gómez")
+    return ' '.join(palabra[:1].upper() + palabra[1:].lower() for palabra in texto.split())
 
 
 def _palabra(original, m, grupo):
@@ -322,7 +328,8 @@ def _interpretar_creacion(original, hoy, ahora):
             texto = _quitar(texto, m)
             break
 
-    m = PERSONA.search(normalizar(texto)) or PERSONA_PARA.search(normalizar(texto))
+    normal = normalizar(texto)
+    m = PERSONA_LARGA.search(normal) or PERSONA.search(normal) or PERSONA_PARA.search(normal)
     if m:
         persona = _persona(texto[m.start(1):m.end(1)])
         texto = _quitar(texto, m)

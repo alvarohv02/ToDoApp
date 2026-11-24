@@ -188,7 +188,17 @@ def crear_tarea(nombre, importancia='Media', fecha_limite='', persona='', status
         datos['carpeta_id'] = carpeta_id
     if grupo_id:
         datos['grupo_id'] = grupo_id
-    return db.insert_task(datos)
+    tarea = db.insert_task(datos)
+    _avisar_encargado(None, tarea)
+    return tarea
+
+
+def _avisar_encargado(antes, tarea):
+    """Si la tarea es de un grupo y su encargado es otro miembro, se le avisa; 'aviso' dice a quién y si se pudo."""
+    import asignaciones
+    aviso = asignaciones.al_guardar(antes, tarea)
+    if aviso:
+        tarea['aviso'] = aviso
 
 
 def actualizar_tarea(id, **cambios):
@@ -198,9 +208,11 @@ def actualizar_tarea(id, **cambios):
     if 'grupo' in cambios:
         cambios['grupo_id'] = resolver_grupo(cambios.pop('grupo'))
     validar_campos(cambios)
+    antes = db.fetch_task(id)
     tarea = db.update_task(id, cambios)
     if tarea is None:
         raise ValueError(f'No existe ninguna tarea con id {id}')
+    _avisar_encargado(antes, tarea)
     return tarea
 
 

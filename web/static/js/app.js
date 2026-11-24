@@ -72,6 +72,14 @@ function normalizarTarea(tarea) {
   };
 }
 
+// La API responde con la tarea y, si su encargado es otro miembro del grupo, 'aviso':
+// { nombre, avisado: true } o { nombre, avisado: false, motivo }. No se guarda con la tarea.
+function tareaYAviso(datos) {
+  const tarea = normalizarTarea(datos);
+  Object.defineProperty(tarea, 'aviso', { value: datos.aviso || null, enumerable: false });
+  return tarea;
+}
+
 async function cargarTareas() {
   try {
     const response = await fetch(API_TASKS_URL);
@@ -104,7 +112,7 @@ async function crearTarea(nuevaTarea) {
     throw new Error(errorData.error || 'No se pudo crear la tarea');
   }
 
-  return normalizarTarea(await response.json());
+  return tareaYAviso(await response.json());
 }
 
 async function actualizarTarea(tarea) {
@@ -121,7 +129,7 @@ async function actualizarTarea(tarea) {
     throw new Error(errorData.error || 'No se pudo actualizar la tarea');
   }
 
-  return normalizarTarea(await response.json());
+  return tareaYAviso(await response.json());
 }
 
 async function borrarTarea(tareaId) {
@@ -990,6 +998,7 @@ function renderizarVistaTareas() {
         tareas: [],
         cargando: true,
         errorCarga: '',
+        avisoOk: '',
         orden: leerOrdenTabla(),
         personaDefecto: PERSONA_DEFECTO
       };
@@ -1217,6 +1226,19 @@ function renderizarVistaTareas() {
         return `Ordenar: ${DESCRIPCION_ORDEN[campo][siguiente === 'asc' ? 0 : 1]}`;
       },
 
+      // "👋 Se lo he dicho a Lucía por el bot" (o por qué no se ha podido), unos segundos
+      avisarEncargado(tarea) {
+        const aviso = tarea.aviso;
+        if (!aviso) {
+          return;
+        }
+        this.avisoOk = aviso.avisado
+          ? `👋 Se lo he dicho a ${aviso.nombre} por el bot.`
+          : `⚠️ No he podido avisar a ${aviso.nombre}: ${aviso.motivo}.`;
+        clearTimeout(this.temporizadorAviso);
+        this.temporizadorAviso = setTimeout(() => { this.avisoOk = ''; }, 6000);
+      },
+
       async recargarTareas() {
         this.cargando = true;
         this.errorCarga = '';
@@ -1250,6 +1272,7 @@ function renderizarVistaTareas() {
 
             if (indice !== -1) {
               this.tareas.splice(indice, 1, tareaGuardada);
+              this.avisarEncargado(tareaGuardada);
             }
           } catch (error) {
             this.errorCarga = error.message;
@@ -1332,6 +1355,7 @@ function renderizarVistaTareas() {
           });
 
           this.tareas.push(tareaCreada);
+          this.avisarEncargado(tareaCreada);
           this.nuevaTarea = {
             nombre: '', importancia: '', fecha_limite: '', hora_limite: '', persona: '', grupo_id: null,
             carpeta_id: this.carpetaElegida ? this.carpetaElegida.id : null

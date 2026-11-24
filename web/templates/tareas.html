@@ -89,6 +89,7 @@
     </section>
 
     <p v-if="errorCarga" class="alert" v-text="errorCarga"></p>
+    <p v-if="avisoOk" class="aviso-ok" role="status" v-text="avisoOk"></p>
 
     <form v-if="mostrarFormulario" class="card task-form" @submit.prevent="agregarTarea">
         <label class="field field-wide">

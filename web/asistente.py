@@ -565,10 +565,20 @@ def _crear(accion, hoy):
     if not db.es_persona_por_defecto(tarea['persona']):
         detalles.append(f'encargado: {tarea["persona"]}')
     detalles.extend(_donde(tarea))
-    texto = f'📝 Apuntada: *{tarea["nombre"]}*\n{" · ".join(detalles)}'
+    texto = f'📝 Apuntada: *{tarea["nombre"]}*\n{" · ".join(detalles)}' + _avisado(tarea)
     if avisos:
         texto += '\n\n' + '\n'.join(f'⚠️ {aviso}' for aviso in avisos)
     return texto
+
+
+def _avisado(tarea):
+    """Si el encargado es otro miembro del grupo: '👋 Se lo digo a Lucía' o por qué no se le puede avisar."""
+    aviso = tarea.get('aviso')
+    if not aviso:
+        return ''
+    if aviso['avisado']:
+        return f'\n👋 Se lo digo a {aviso["nombre"]} por el bot.'
+    return f'\n⚠️ No he podido avisar a {aviso["nombre"]}: {aviso["motivo"]}.'
 
 
 def _aplicar(intencion, tarea, extra, hoy):
@@ -595,19 +605,19 @@ def _aplicar(intencion, tarea, extra, hoy):
         herramientas.actualizar_tarea(tarea['id'], importancia=extra['importancia'])
         return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {EMOJI_IMPORTANCIA[extra["importancia"]]} {extra["importancia"]}'
     elif intencion == 'asignar':
-        herramientas.actualizar_tarea(tarea['id'], persona=extra['persona'])
-        return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {extra["persona"]}'
+        cambiada = herramientas.actualizar_tarea(tarea['id'], persona=extra['persona'])
+        return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {extra["persona"]}' + _avisado(cambiada)
     elif intencion == 'carpeta':
         cambiada = herramientas.actualizar_tarea(tarea['id'], carpeta_id=extra['carpeta_id'])
         if not extra['carpeta_id']:
             return f'Sacada de su carpeta: *{tarea["nombre"]}*'
         donde = ' · '.join(_donde(cambiada))
-        return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {donde}'
+        return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {donde}' + _avisado(cambiada)
     elif intencion == 'compartir':
         cambiada = herramientas.actualizar_tarea(tarea['id'], grupo_id=extra['grupo_id'])
         if not extra['grupo_id']:
             return f'Ya no se comparte: *{tarea["nombre"]}* (ahora es solo tuya)'
-        return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {" · ".join(_donde(cambiada))}'
+        return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {" · ".join(_donde(cambiada))}' + _avisado(cambiada)
     return f'{VERBOS[intencion]}: *{tarea["nombre"]}*'
 
 

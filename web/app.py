@@ -8,6 +8,7 @@ from flask import Flask, g, jsonify, render_template, request, send_from_directo
 # El .env vive en la raíz del proyecto (un nivel por encima de /web)
 load_dotenv(Path(__file__).resolve().parent.parent / '.env')
 
+import asignaciones
 import avisos
 import copias
 import correo
@@ -345,6 +346,10 @@ def tareas_api():
     except db.DatosNoValidos as error:
         return jsonify({'error': error.mensaje}), 400
 
+    # Si es de un grupo y el encargado es otro miembro, el bot se lo dice
+    aviso = asignaciones.al_guardar(None, task)
+    if aviso:
+        task['aviso'] = aviso
     return jsonify(task), 201
 
 
@@ -445,6 +450,7 @@ def tarea_api(task_id):
 
     payload = request.get_json(silent=True) or {}
 
+    antes = db.fetch_task(task_id)
     try:
         task = db.update_task(task_id, payload)
     except db.DatosNoValidos as error:
@@ -453,6 +459,9 @@ def tarea_api(task_id):
     if task is None:
         return jsonify({'error': 'Tarea no encontrada'}), 404
 
+    aviso = asignaciones.al_guardar(antes, task)
+    if aviso:
+        task['aviso'] = aviso
     return jsonify(task)
 
 
