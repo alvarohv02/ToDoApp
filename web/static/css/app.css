@@ -2283,22 +2283,23 @@ tbody tr:last-child td {
     }
 }
 
-/* Tabla de tareas en el móvil: cada fila es una tarjeta, no hace falta desplazarse de lado */
+/* Tabla de tareas en el móvil: cada fila es una tarjeta, no hace falta desplazarse de lado.
+   Solo la de tareas (.table-shell): las tablas de las notas siguen siendo tablas */
 @media (max-width: 700px) {
     .table-shell {
         overflow: visible;
     }
 
-    table,
-    tbody {
+    .table-shell table,
+    .table-shell tbody {
         display: block;
     }
 
-    thead {
+    .table-shell thead {
         display: block;
     }
 
-    thead tr {
+    .table-shell thead tr {
         display: flex;
         flex-wrap: wrap;
         gap: 0.4rem;
@@ -2306,7 +2307,7 @@ tbody tr:last-child td {
         border-bottom: 1px solid var(--border);
     }
 
-    th {
+    .table-shell th {
         position: static;
         display: block;
         padding: 0.3rem 0.65rem;
@@ -2316,11 +2317,11 @@ tbody tr:last-child td {
         letter-spacing: 0.04em;
     }
 
-    th.col-acciones {
+    .table-shell th.col-acciones {
         display: none;
     }
 
-    tbody tr {
+    .table-shell tbody tr {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
@@ -2329,11 +2330,11 @@ tbody tr:last-child td {
         border-bottom: 1px solid var(--border);
     }
 
-    tbody tr:hover td {
+    .table-shell tbody tr:hover td {
         background: transparent;
     }
 
-    td {
+    .table-shell td {
         display: block;
         min-width: 0;
         max-width: 100%;
@@ -2343,7 +2344,7 @@ tbody tr:last-child td {
         font-size: 0.85rem;
     }
 
-    td:empty {
+    .table-shell td:empty {
         display: none;
     }
 
@@ -2359,14 +2360,14 @@ tbody tr:last-child td {
         order: -1;
     }
 
-    td[data-col]::before {
+    .table-shell td[data-col]::before {
         content: attr(data-col) ": ";
         color: var(--text-faint);
         font-size: 0.75rem;
         font-weight: 650;
     }
 
-    td.empty-state {
+    .table-shell td.empty-state {
         width: 100%;
     }
 }
@@ -3591,5 +3592,213 @@ tbody tr:last-child td {
 
     .nota-elemento .icon-btn {
         opacity: 1;
+    }
+}
+
+/* ---------- Notas: tablas (como una hoja de cálculo) ---------- */
+.nota-tipos {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.modal.nota-editor.es-tabla {
+    width: min(1100px, 100%);
+}
+
+.nota-tabla-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    min-width: 0;
+}
+
+.hoja-barra {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.hoja-barra .btn {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
+}
+
+.hoja-barra .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.hoja-opcion {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.hoja-envoltorio {
+    max-height: min(55vh, 520px);
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+}
+
+.hoja {
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.9rem;
+}
+
+.hoja th,
+.hoja td {
+    padding: 0;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+}
+
+/* Letras de columna y números de fila: se quedan a la vista al desplazarse */
+.hoja-col,
+.hoja-esquina {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.hoja-fila,
+.hoja-esquina {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+}
+
+.hoja-esquina {
+    z-index: 3;
+}
+
+.hoja-col,
+.hoja-fila,
+.hoja-esquina {
+    min-width: 2.4rem;
+    padding: 0.25rem 0.4rem;
+    background: var(--surface-2);
+    color: var(--text-faint);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-align: center;
+    user-select: none;
+}
+
+.hoja-col.activa,
+.hoja-fila.activa {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.hoja-celda {
+    display: block;
+    width: 100%;
+    min-width: 8.5rem;
+    padding: 0.4rem 0.5rem;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+}
+
+.hoja-celda:focus {
+    position: relative;
+    z-index: 1;
+    box-shadow: inset 0 0 0 2px var(--accent);
+    background: var(--surface);
+}
+
+.hoja-celda.es-encabezado {
+    font-weight: 750;
+    background: var(--surface-2);
+}
+
+.hoja-celda.es-numero {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.hoja-celda.es-formula:not(:focus) {
+    color: var(--accent);
+}
+
+.hoja-celda.es-error:not(:focus) {
+    color: var(--danger);
+    font-weight: 650;
+}
+
+.hoja-ayuda {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: 0.8rem;
+    line-height: 1.45;
+}
+
+.hoja-ayuda code {
+    padding: 0 0.25rem;
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+}
+
+/* Vista previa de una tabla en su tarjeta */
+.nota-tarjeta-tabla {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.82rem;
+}
+
+.nota-tarjeta-tabla th,
+.nota-tarjeta-tabla td {
+    padding: 0.25rem 0.35rem;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    text-align: left;
+}
+
+.nota-tarjeta-tabla th {
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.nota-tarjeta-tabla .es-numero {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.nota-tarjeta-tabla .es-error {
+    color: var(--danger);
+}
+
+@media (max-width: 700px) {
+    .nota-tipos {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .hoja-envoltorio {
+        max-height: 50dvh;
+    }
+
+    .hoja-celda {
+        min-width: 7rem;
+    }
+
+    .hoja-opcion {
+        margin-left: 0;
     }
 }

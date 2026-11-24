@@ -2227,10 +2227,289 @@ function vigilarSesion() {
   };
 }
 
+// --- Tablas: fórmulas como en Excel -----------------------------------------------------------
+// =A1+B2*2, =SUMA(B2:B10), =PROMEDIO(C2:C5), MIN, MAX, CONTAR, REDONDEAR(x; decimales).
+// Se analizan a mano (nunca con eval). Una celda que no es fórmula se usa como número si lo parece
+// ("3", "1,5", "2.000,50", "12 €", "30%").
+
+const FUNCIONES_TABLA = {
+  SUMA: (v) => v.reduce((a, b) => a + b, 0),
+  SUM: (v) => v.reduce((a, b) => a + b, 0),
+  PROMEDIO: (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : errorTabla('#DIV/0!')),
+  MEDIA: (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : errorTabla('#DIV/0!')),
+  AVERAGE: (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : errorTabla('#DIV/0!')),
+  MIN: (v) => (v.length ? Math.min(...v) : 0),
+  MAX: (v) => (v.length ? Math.max(...v) : 0),
+  CONTAR: (v) => v.length,
+  COUNT: (v) => v.length
+};
+
+function errorTabla(codigo) {
+  const error = new Error(codigo);
+  error.codigoTabla = codigo;
+  throw error;
+}
+
+function letraColumna(indice) {
+  return String.fromCharCode(65 + indice);
+}
+
+// "3", "-1,5", "2.000,50", "1,234.5", "12 €", "30%" -> número; si no parece un número, null
+function numeroDeCelda(texto) {
+  let limpio = String(texto || '').trim().replace(/[€$\s]/g, '');
+  if (!limpio) {
+    return null;
+  }
+  let porcentaje = false;
+  if (limpio.endsWith('%')) {
+    porcentaje = true;
+    limpio = limpio.slice(0, -1);
+  }
+  if (/^[-+]?\d{1,3}(\.\d{3})+(,\d+)?$/.test(limpio)) {
+    limpio = limpio.replace(/\./g, '').replace(',', '.');        // 2.000,50
+  } else if (/^[-+]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(limpio)) {
+    limpio = limpio.replace(/,/g, '');                            // 1,234.5
+  } else {
+    limpio = limpio.replace(',', '.');                            // 1,5
+  }
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(limpio)) {
+    return null;
+  }
+  const numero = Number(limpio);
+  return porcentaje ? numero / 100 : numero;
+}
+
+function trocearFormula(formula) {
+  const piezas = [];
+  const patron = /\s*(?:(\d+(?:\.\d+)?)|([A-Za-z]{1,2}\d{1,3}(?::[A-Za-z]{1,2}\d{1,3})?)|([A-Za-zÁÉÍÓÚáéíóú]+)\s*\(|([-+*/^();,]))/y;
+  let posicion = 0;
+  while (posicion < formula.length) {
+    if (!formula.slice(posicion).trim()) {
+      break;
+    }
+    patron.lastIndex = posicion;
+    const m = patron.exec(formula);
+    if (!m) {
+      errorTabla('#ERROR');
+    }
+    if (m[1] !== undefined) piezas.push({ tipo: 'num', valor: Number(m[1]) });
+    else if (m[2] !== undefined) piezas.push({ tipo: 'ref', valor: m[2].toUpperCase() });
+    else if (m[3] !== undefined) piezas.push({ tipo: 'fun', valor: m[3].toUpperCase() });
+    else piezas.push({ tipo: 'op', valor: m[4] });
+    posicion = patron.lastIndex;
+  }
+  return piezas;
+}
+
+function posicionRef(ref) {
+  const m = /^([A-Z]{1,2})(\d{1,3})$/.exec(ref);
+  const columna = m[1].length === 1 ? m[1].charCodeAt(0) - 65 : 26 + (m[1].charCodeAt(0) - 65) * 26 + (m[1].charCodeAt(1) - 65);
+  return { fila: Number(m[2]) - 1, columna };
+}
+
+// Calcula todas las celdas. Devuelve una matriz con, por celda, { valor (texto a enseñar), numero (o null), error }
+function calcularTabla(filas) {
+  const resultados = filas.map((fila) => fila.map(() => null));
+  const enCurso = new Set();
+
+  function valorCelda(f, c) {
+    if (f < 0 || c < 0 || f >= filas.length || c >= (filas[f] || []).length) {
+      errorTabla('#REF!');
+    }
+    return calcular(f, c);
+  }
+
+  function numeroDe(f, c, enRango) {
+    const r = valorCelda(f, c);
+    if (r.error) errorTabla(r.error);
+    if (r.numero !== null) return r.numero;
+    if (enRango || !String(r.valor).trim()) return enRango ? null : 0;  // en SUMA el texto se ignora
+    return errorTabla('#VALOR!');
+  }
+
+  function evaluarFormula(texto) {
+    const piezas = trocearFormula(texto);
+    let i = 0;
+    const ver = () => piezas[i];
+    const tomar = (valor) => {
+      const p = piezas[i];
+      if (!p || (valor !== undefined && p.valor !== valor)) errorTabla('#ERROR');
+      i += 1;
+      return p;
+    };
+
+    function argumentos() {
+      const valores = [];
+      if (ver() && ver().valor === ')') {
+        tomar(')');
+        return valores;
+      }
+      for (;;) {
+        const p = ver();
+        if (p && p.tipo === 'ref' && p.valor.includes(':')) {
+          tomar();
+          const [desde, hasta] = p.valor.split(':').map(posicionRef);
+          for (let f = Math.min(desde.fila, hasta.fila); f <= Math.max(desde.fila, hasta.fila); f += 1) {
+            for (let c = Math.min(desde.columna, hasta.columna); c <= Math.max(desde.columna, hasta.columna); c += 1) {
+              if (f < filas.length && c < (filas[f] || []).length) {
+                const n = numeroDe(f, c, true);
+                if (n !== null) valores.push(n);
+              }
+            }
+          }
+        } else if (p && p.tipo === 'ref') {
+          tomar();
+          const { fila, columna } = posicionRef(p.valor);
+          const n = numeroDe(fila, columna, true);
+          if (n !== null) valores.push(n);
+        } else {
+          valores.push(suma());
+        }
+        const sep = tomar();
+        if (sep.valor === ')') return valores;
+        if (sep.valor !== ';' && sep.valor !== ',') errorTabla('#ERROR');
+      }
+    }
+
+    function primario() {
+      const p = tomar();
+      if (p.tipo === 'num') return p.valor;
+      if (p.tipo === 'ref') {
+        if (p.valor.includes(':')) errorTabla('#VALOR!');  // un rango suelto, fuera de una función
+        const { fila, columna } = posicionRef(p.valor);
+        return numeroDe(fila, columna, false);
+      }
+      if (p.tipo === 'fun') {
+        if (p.valor === 'REDONDEAR' || p.valor === 'ROUND') {
+          const [x, d = 0] = argumentos();
+          const factor = 10 ** Math.round(d);
+          return Math.round(x * factor) / factor;
+        }
+        const funcion = FUNCIONES_TABLA[p.valor];
+        if (!funcion) errorTabla('#NOMBRE?');
+        return funcion(argumentos());
+      }
+      if (p.valor === '(') {
+        const v = suma();
+        tomar(')');
+        return v;
+      }
+      if (p.valor === '-') return -primario();
+      if (p.valor === '+') return primario();
+      return errorTabla('#ERROR');
+    }
+
+    function potencia() {
+      let v = primario();
+      while (ver() && ver().valor === '^') {
+        tomar();
+        v **= primario();
+      }
+      return v;
+    }
+
+    function producto() {
+      let v = potencia();
+      while (ver() && (ver().valor === '*' || ver().valor === '/')) {
+        const op = tomar().valor;
+        const d = potencia();
+        if (op === '/' && d === 0) errorTabla('#DIV/0!');
+        v = op === '*' ? v * d : v / d;
+      }
+      return v;
+    }
+
+    function suma() {
+      let v = producto();
+      while (ver() && (ver().valor === '+' || ver().valor === '-')) {
+        v = tomar().valor === '+' ? v + producto() : v - producto();
+      }
+      return v;
+    }
+
+    const resultado = suma();
+    if (i !== piezas.length) errorTabla('#ERROR');
+    if (!Number.isFinite(resultado)) errorTabla('#NUM!');
+    return resultado;
+  }
+
+  function calcular(f, c) {
+    if (resultados[f][c]) return resultados[f][c];
+    const clave = `${f},${c}`;
+    if (enCurso.has(clave)) errorTabla('#CICLO!');
+    const texto = filas[f][c] ?? '';
+    let resultado;
+    if (String(texto).trim().startsWith('=')) {
+      enCurso.add(clave);
+      try {
+        const numero = evaluarFormula(String(texto).trim().slice(1));
+        resultado = { valor: formatearNumeroTabla(numero), numero, error: '' };
+      } catch (error) {
+        if (!error.codigoTabla) throw error;
+        resultado = { valor: error.codigoTabla, numero: null, error: error.codigoTabla };
+      } finally {
+        enCurso.delete(clave);
+      }
+    } else {
+      resultado = { valor: texto, numero: numeroDeCelda(texto), error: '' };
+    }
+    resultados[f][c] = resultado;
+    return resultado;
+  }
+
+  filas.forEach((fila, f) => fila.forEach((_, c) => calcular(f, c)));
+  return resultados;
+}
+
+function formatearNumeroTabla(numero) {
+  return numero.toLocaleString('es-ES', { maximumFractionDigits: 4, useGrouping: Math.abs(numero) >= 10000 });
+}
+
 // --- Notas ---------------------------------------------------------------------------------
 // De texto libre o listas cuyos elementos se tachan al pulsarlos (como la lista de la compra).
 
 const API_NOTAS = '/api/notas';
+const MAX_FILAS_TABLA = 200;
+const MAX_COLUMNAS_TABLA = 26;
+
+// El contenido de una nota de tabla (JSON); si no se puede leer, una tabla vacía de 4×3
+function leerTabla(contenido) {
+  try {
+    const datos = JSON.parse(contenido || '');
+    if (Array.isArray(datos.filas) && datos.filas.length && datos.filas.every(Array.isArray)) {
+      const columnas = Math.max(1, ...datos.filas.map((f) => f.length));
+      return {
+        filas: datos.filas.map((f) => [...f.map((c) => String(c ?? '')), ...Array(columnas - f.length).fill('')]),
+        encabezado: datos.encabezado !== false
+      };
+    }
+  } catch (error) {
+    // contenido vacío o roto: tabla nueva
+  }
+  return { filas: Array.from({ length: 4 }, () => ['', '', '']), encabezado: true };
+}
+
+// Al insertar o quitar filas/columnas, las fórmulas siguen apuntando a las mismas celdas (como en Excel).
+// eje: 'fila' o 'columna'; desde: índice donde se inserta/quita; delta: +1 o -1
+function moverReferencias(filas, eje, desde, delta) {
+  return filas.map((fila) => fila.map((celda) => {
+    if (!String(celda).trim().startsWith('=')) {
+      return celda;
+    }
+    return celda.replace(/\b([A-Za-z])(\d{1,3})\b/g, (ref, letra, numero) => {
+      const columna = letra.toUpperCase().charCodeAt(0) - 65;
+      const filaRef = Number(numero) - 1;
+      const indice = eje === 'fila' ? filaRef : columna;
+      if (delta < 0 && indice === desde) {
+        return 'REF';  // apuntaba a lo que se ha quitado: la fórmula dará error
+      }
+      if (indice < desde) {
+        return ref;
+      }
+      return eje === 'fila' ? `${letra}${filaRef + 1 + delta}` : `${letraColumna(columna + delta)}${numero}`;
+    });
+  }));
+}
 
 async function peticionNota(url, opciones = {}) {
   const response = await fetch(url, { ...opciones, headers: { 'Content-Type': 'application/json' } });
@@ -2269,6 +2548,9 @@ function renderizarNotas() {
   const campoTitulo = editor.querySelector('[data-nota-titulo]');
   const campoTexto = editor.querySelector('[data-nota-texto]');
   const bloqueLista = editor.querySelector('[data-nota-lista-editor]');
+  const bloqueTabla = editor.querySelector('[data-nota-tabla]');
+  const rejilla = editor.querySelector('[data-tabla-rejilla]');
+  const casillaEncabezado = editor.querySelector('[data-tabla-encabezado]');
   const formAnadir = editor.querySelector('[data-nota-anadir]');
   const campoElemento = editor.querySelector('[data-nota-elemento]');
   const listaPendientes = editor.querySelector('[data-nota-pendientes]');
@@ -2284,6 +2566,8 @@ function renderizarNotas() {
   let abierta = null;        // nota que se está editando
   let temporizador = null;   // guardado del texto mientras se escribe
   let guardando = Promise.resolve();
+  let tabla = null;          // la tabla que se está editando: { filas, encabezado }
+  let celdaActiva = { fila: 0, columna: 0 };
 
   function mostrarError(mensaje) {
     errorGeneral.textContent = mensaje || '';
@@ -2307,7 +2591,8 @@ function renderizarNotas() {
     if (!busqueda) {
       return true;
     }
-    const texto = [nota.titulo, nota.contenido, ...nota.elementos.map((e) => e.texto)].join('\n').toLocaleLowerCase('es');
+    const contenido = nota.tipo === 'tabla' ? leerTabla(nota.contenido).filas.flat().join('\n') : nota.contenido;
+    const texto = [nota.titulo, contenido, ...nota.elementos.map((e) => e.texto)].join('\n').toLocaleLowerCase('es');
     return texto.includes(busqueda);
   }
 
@@ -2360,6 +2645,8 @@ function renderizarNotas() {
       texto.textContent = nota.contenido || 'Vacía';
       texto.classList.toggle('es-vacia', !nota.contenido);
       caja.append(texto);
+    } else if (nota.tipo === 'tabla') {
+      caja.append(...vistaPreviaTabla(leerTabla(nota.contenido)));
     } else {
       // Primero lo que falta; se puede tachar desde aquí mismo, sin abrir la lista
       const pendientes = nota.elementos.filter((e) => !e.hecho);
@@ -2416,6 +2703,45 @@ function renderizarNotas() {
     return caja;
   }
 
+  function vistaPreviaTabla(datos) {
+    const resultados = calcularTabla(datos.filas);
+    const filas = datos.filas.slice(0, 5);
+    const columnas = Math.min(datos.filas[0].length, 4);
+    const vacia = datos.filas.every((f) => f.every((c) => !String(c).trim()));
+    if (vacia) {
+      const texto = document.createElement('p');
+      texto.className = 'nota-tarjeta-texto es-vacia';
+      texto.textContent = 'Tabla vacía';
+      return [texto];
+    }
+    const tablaEl = document.createElement('table');
+    tablaEl.className = 'nota-tarjeta-tabla';
+    filas.forEach((fila, f) => {
+      const tr = document.createElement('tr');
+      fila.slice(0, columnas).forEach((_, c) => {
+        const celda = document.createElement(datos.encabezado && f === 0 ? 'th' : 'td');
+        const r = resultados[f][c];
+        celda.textContent = r.valor;
+        celda.classList.toggle('es-numero', r.numero !== null && !(datos.encabezado && f === 0));
+        celda.classList.toggle('es-error', Boolean(r.error));
+        tr.append(celda);
+      });
+      tablaEl.append(tr);
+    });
+    const piezas = [tablaEl];
+    const ocultas = [];
+    const cuantas = (n, una, varias) => `${n} ${n === 1 ? una : varias}`;
+    if (datos.filas.length > 5) ocultas.push(cuantas(datos.filas.length - 5, 'fila', 'filas'));
+    if (datos.filas[0].length > 4) ocultas.push(cuantas(datos.filas[0].length - 4, 'columna', 'columnas'));
+    if (ocultas.length) {
+      const mas = document.createElement('p');
+      mas.className = 'nota-tarjeta-mas';
+      mas.textContent = `+ ${ocultas.join(' y ')} más`;
+      piezas.push(mas);
+    }
+    return piezas;
+  }
+
   // --- Cargar ------------------------------------------------------------------------------
   async function cargar() {
     try {
@@ -2459,6 +2785,13 @@ function renderizarNotas() {
     campoTexto.value = nota.contenido;
     campoTexto.hidden = nota.tipo !== 'texto';
     bloqueLista.hidden = nota.tipo !== 'lista';
+    bloqueTabla.hidden = nota.tipo !== 'tabla';
+    editor.querySelector('.nota-editor').classList.toggle('es-tabla', nota.tipo === 'tabla');
+    if (nota.tipo === 'tabla') {
+      tabla = leerTabla(nota.contenido);
+      celdaActiva = { fila: 0, columna: 0 };
+      pintarTabla();
+    }
     campoGrupo.hidden = !rellenarSelectorGrupo(selectGrupo, 'notas', nota.grupo_id || null);
     estado.textContent = nota.grupo_id ? `Compartida con ${nombreGrupo(nota.grupo_id)}` : '';
     pintarFijar();
@@ -2469,6 +2802,222 @@ function renderizarNotas() {
       campoTitulo.focus();
     }
   }
+
+  // --- Tabla ---------------------------------------------------------------------------------
+  function celdaEn(fila, columna) {
+    return rejilla.querySelector(`[data-fila="${fila}"][data-columna="${columna}"]`);
+  }
+
+  function pintarTabla() {
+    const columnas = tabla.filas[0].length;
+    const hoja = document.createElement('table');
+    hoja.className = 'hoja';
+    const cabecera = document.createElement('tr');
+    const esquina = document.createElement('th');
+    esquina.className = 'hoja-esquina';
+    cabecera.append(esquina);
+    for (let c = 0; c < columnas; c += 1) {
+      const th = document.createElement('th');
+      th.className = 'hoja-col';
+      th.dataset.cabeceraColumna = c;
+      th.textContent = letraColumna(c);
+      cabecera.append(th);
+    }
+    const thead = document.createElement('thead');
+    thead.append(cabecera);
+    const tbody = document.createElement('tbody');
+    tabla.filas.forEach((fila, f) => {
+      const tr = document.createElement('tr');
+      const numero = document.createElement('th');
+      numero.className = 'hoja-fila';
+      numero.dataset.cabeceraFila = f;
+      numero.textContent = f + 1;
+      tr.append(numero);
+      fila.forEach((_, c) => {
+        const td = document.createElement('td');
+        const campo = document.createElement('input');
+        campo.className = 'hoja-celda';
+        campo.dataset.fila = f;
+        campo.dataset.columna = c;
+        campo.setAttribute('aria-label', `Celda ${letraColumna(c)}${f + 1}`);
+        campo.autocomplete = 'off';
+        campo.spellcheck = false;
+        td.append(campo);
+        tr.append(td);
+      });
+      tbody.append(tr);
+    });
+    hoja.append(thead, tbody);
+    rejilla.replaceChildren(hoja);
+    casillaEncabezado.checked = tabla.encabezado;
+    refrescarTabla();
+    pintarBotonesTabla();
+  }
+
+  // Cada celda enseña su resultado; la que se está editando, lo que hay escrito (la fórmula)
+  function refrescarTabla() {
+    const resultados = calcularTabla(tabla.filas);
+    rejilla.querySelectorAll('.hoja-celda').forEach((campo) => {
+      const f = Number(campo.dataset.fila);
+      const c = Number(campo.dataset.columna);
+      const r = resultados[f][c];
+      const editando = campo === document.activeElement;
+      if (!editando) {
+        campo.value = r.valor;
+      }
+      const esEncabezado = tabla.encabezado && f === 0;
+      campo.classList.toggle('es-encabezado', esEncabezado);
+      campo.classList.toggle('es-numero', !editando && !esEncabezado && r.numero !== null);
+      campo.classList.toggle('es-error', !editando && Boolean(r.error));
+      campo.classList.toggle('es-formula', String(tabla.filas[f][c]).trim().startsWith('='));
+      campo.title = String(tabla.filas[f][c]).trim().startsWith('=') ? `${tabla.filas[f][c]}` : '';
+    });
+    rejilla.querySelectorAll('[data-cabecera-fila]').forEach((th) => {
+      th.classList.toggle('activa', Number(th.dataset.cabeceraFila) === celdaActiva.fila);
+    });
+    rejilla.querySelectorAll('[data-cabecera-columna]').forEach((th) => {
+      th.classList.toggle('activa', Number(th.dataset.cabeceraColumna) === celdaActiva.columna);
+    });
+  }
+
+  function pintarBotonesTabla() {
+    const filas = tabla.filas.length;
+    const columnas = tabla.filas[0].length;
+    editor.querySelector('[data-tabla="fila"]').disabled = filas >= MAX_FILAS_TABLA;
+    editor.querySelector('[data-tabla="columna"]').disabled = columnas >= MAX_COLUMNAS_TABLA;
+    editor.querySelector('[data-tabla="quitar-fila"]').disabled = filas <= 1;
+    editor.querySelector('[data-tabla="quitar-columna"]').disabled = columnas <= 1;
+  }
+
+  function irACelda(fila, columna) {
+    const f = Math.max(0, Math.min(fila, tabla.filas.length - 1));
+    const c = Math.max(0, Math.min(columna, tabla.filas[0].length - 1));
+    const campo = celdaEn(f, c);
+    if (campo) {
+      campo.focus();
+      campo.select();
+    }
+  }
+
+  function tablaCambiada() {
+    refrescarTabla();
+    programarGuardado();
+  }
+
+  rejilla.addEventListener('focusin', (evento) => {
+    const campo = evento.target.closest('.hoja-celda');
+    if (!campo) return;
+    celdaActiva = { fila: Number(campo.dataset.fila), columna: Number(campo.dataset.columna) };
+    campo.value = tabla.filas[celdaActiva.fila][celdaActiva.columna];  // la fórmula, no el resultado
+    refrescarTabla();
+  });
+  rejilla.addEventListener('focusout', () => {
+    setTimeout(() => { if (tabla) refrescarTabla(); }, 0);  // al salir, la celda vuelve a enseñar su resultado
+  });
+  rejilla.addEventListener('input', (evento) => {
+    const campo = evento.target.closest('.hoja-celda');
+    if (!campo) return;
+    tabla.filas[Number(campo.dataset.fila)][Number(campo.dataset.columna)] = campo.value.slice(0, 500);
+    tablaCambiada();
+  });
+  rejilla.addEventListener('keydown', (evento) => {
+    const campo = evento.target.closest('.hoja-celda');
+    if (!campo) return;
+    const f = Number(campo.dataset.fila);
+    const c = Number(campo.dataset.columna);
+    const alPrincipio = campo.selectionStart === 0 && campo.selectionEnd === 0;
+    const alFinal = campo.selectionStart === campo.value.length;
+    if (evento.key === 'Enter' || evento.key === 'ArrowDown') {
+      evento.preventDefault();
+      if (evento.key === 'Enter' && evento.shiftKey) {
+        irACelda(f - 1, c);
+      } else if (f === tabla.filas.length - 1 && evento.key === 'Enter' && tabla.filas.length < MAX_FILAS_TABLA) {
+        anadirFila(f + 1);  // Intro en la última fila: fila nueva, como en las hojas de cálculo
+        irACelda(f + 1, c);
+      } else {
+        irACelda(f + 1, c);
+      }
+    } else if (evento.key === 'ArrowUp') {
+      evento.preventDefault();
+      irACelda(f - 1, c);
+    } else if (evento.key === 'ArrowLeft' && alPrincipio && c > 0) {
+      evento.preventDefault();
+      irACelda(f, c - 1);
+    } else if (evento.key === 'ArrowRight' && alFinal && c < tabla.filas[0].length - 1) {
+      evento.preventDefault();
+      irACelda(f, c + 1);
+    } else if (evento.key === 'Escape') {
+      evento.stopPropagation();  // Escape solo sale de la celda, no cierra la nota
+      evento.preventDefault();
+      campo.blur();
+    }
+  });
+
+  // Pegar varias celdas copiadas de Excel o Google Sheets (separadas por tabuladores y saltos de línea)
+  rejilla.addEventListener('paste', (evento) => {
+    const campo = evento.target.closest('.hoja-celda');
+    const pegado = (evento.clipboardData || window.clipboardData).getData('text');
+    if (!campo || !/[\t\n]/.test(pegado.replace(/\r?\n$/, ''))) {
+      return;
+    }
+    evento.preventDefault();
+    const bloque = pegado.replace(/\r/g, '').replace(/\n$/, '').split('\n').map((linea) => linea.split('\t'));
+    const f0 = Number(campo.dataset.fila);
+    const c0 = Number(campo.dataset.columna);
+    const filasNecesarias = Math.min(MAX_FILAS_TABLA, f0 + bloque.length);
+    const columnasNecesarias = Math.min(MAX_COLUMNAS_TABLA, c0 + Math.max(...bloque.map((l) => l.length)));
+    while (tabla.filas.length < filasNecesarias) tabla.filas.push(Array(tabla.filas[0].length).fill(''));
+    tabla.filas.forEach((fila) => { while (fila.length < columnasNecesarias) fila.push(''); });
+    bloque.forEach((linea, i) => linea.forEach((valor, j) => {
+      if (f0 + i < filasNecesarias && c0 + j < columnasNecesarias) {
+        tabla.filas[f0 + i][c0 + j] = valor.slice(0, 500);
+      }
+    }));
+    if (bloque.length + f0 > MAX_FILAS_TABLA || bloque.some((l) => l.length + c0 > MAX_COLUMNAS_TABLA)) {
+      mostrarError(`Una tabla tiene como mucho ${MAX_FILAS_TABLA} filas y ${MAX_COLUMNAS_TABLA} columnas: lo que sobraba no se ha pegado.`);
+    }
+    pintarTabla();
+    irACelda(f0, c0);
+    programarGuardado();
+  });
+
+  function anadirFila(posicion) {
+    tabla.filas = moverReferencias(tabla.filas, 'fila', posicion, 1);
+    tabla.filas.splice(posicion, 0, Array(tabla.filas[0].length).fill(''));
+    pintarTabla();
+    programarGuardado();
+  }
+
+  editor.querySelectorAll('[data-tabla]').forEach((boton) => boton.addEventListener('click', () => {
+    const { fila, columna } = celdaActiva;
+    const accion = boton.dataset.tabla;
+    if (accion === 'fila') {
+      anadirFila(Math.min(fila + 1, tabla.filas.length));
+      irACelda(fila + 1, columna);
+      return;
+    }
+    if (accion === 'columna') {
+      tabla.filas = moverReferencias(tabla.filas, 'columna', columna + 1, 1);
+      tabla.filas.forEach((f) => f.splice(columna + 1, 0, ''));
+      celdaActiva = { fila, columna: columna + 1 };
+    } else if (accion === 'quitar-fila' && tabla.filas.length > 1) {
+      tabla.filas = moverReferencias(tabla.filas, 'fila', fila, -1);
+      tabla.filas.splice(fila, 1);
+      celdaActiva = { fila: Math.min(fila, tabla.filas.length - 1), columna };
+    } else if (accion === 'quitar-columna' && tabla.filas[0].length > 1) {
+      tabla.filas = moverReferencias(tabla.filas, 'columna', columna, -1);
+      tabla.filas.forEach((f) => f.splice(columna, 1));
+      celdaActiva = { fila, columna: Math.min(columna, tabla.filas[0].length - 1) };
+    }
+    pintarTabla();
+    irACelda(celdaActiva.fila, celdaActiva.columna);
+    programarGuardado();
+  }));
+
+  casillaEncabezado.addEventListener('change', () => {
+    tabla.encabezado = casillaEncabezado.checked;
+    tablaCambiada();
+  });
 
   function pintarFijar() {
     botonFijar.textContent = abierta && abierta.fijada ? '📌 Desfijar' : '📌 Fijar';
@@ -2621,8 +3170,13 @@ function renderizarNotas() {
     const cambios = { titulo: campoTitulo.value };
     if (nota.tipo === 'texto') {
       cambios.contenido = campoTexto.value;
+    } else if (nota.tipo === 'tabla' && tabla) {
+      cambios.contenido = JSON.stringify(tabla);
     }
-    if (cambios.titulo === nota.titulo && (nota.tipo !== 'texto' || cambios.contenido === nota.contenido)) {
+    // La tabla se compara ya leída: el servidor la guarda con otro espaciado
+    const mismoContenido = nota.tipo === 'texto' ? cambios.contenido === nota.contenido
+      : nota.tipo === 'tabla' ? cambios.contenido === JSON.stringify(leerTabla(nota.contenido)) : true;
+    if (cambios.titulo === nota.titulo && mismoContenido) {
       estado.textContent = 'Guardada';
       return guardando;
     }
@@ -2652,7 +3206,11 @@ function renderizarNotas() {
   campoTitulo.addEventListener('keydown', (evento) => {
     if (evento.key === 'Enter') {
       evento.preventDefault();
-      (abierta && abierta.tipo === 'lista' ? campoElemento : campoTexto).focus();
+      if (abierta && abierta.tipo === 'tabla') {
+        irACelda(0, 0);
+      } else {
+        (abierta && abierta.tipo === 'lista' ? campoElemento : campoTexto).focus();
+      }
     }
   });
 
@@ -2661,7 +3219,8 @@ function renderizarNotas() {
     const grupoId = selectGrupo.value ? Number(selectGrupo.value) : null;
     try {
       const guardada = await peticionNota(`${API_NOTAS}/${nota.id}`, { method: 'PUT', body: JSON.stringify({ grupo_id: grupoId }) });
-      actualizarEnLista({ ...guardada, titulo: campoTitulo.value, contenido: nota.tipo === 'texto' ? campoTexto.value : guardada.contenido });
+      const contenido = nota.tipo === 'texto' ? campoTexto.value : nota.tipo === 'tabla' ? JSON.stringify(tabla) : guardada.contenido;
+      actualizarEnLista({ ...guardada, titulo: campoTitulo.value, contenido });
       estado.textContent = grupoId ? `Compartida con ${nombreGrupo(grupoId)}` : 'Solo para ti';
       mostrarError('');
     } catch (error) {
@@ -2707,13 +3266,16 @@ function renderizarNotas() {
     if (guardar && nota) {
       await guardarTexto();
       // Una nota recién creada que se cierra sin escribir nada no se guarda
-      const vacia = !campoTitulo.value.trim() && (nota.tipo === 'texto' ? !campoTexto.value.trim() : !nota.elementos.length);
+      const sinContenido = nota.tipo === 'texto' ? !campoTexto.value.trim()
+        : nota.tipo === 'tabla' ? tabla.filas.every((f) => f.every((c) => !String(c).trim())) : !nota.elementos.length;
+      const vacia = !campoTitulo.value.trim() && sinContenido;
       if (vacia) {
         await peticionNota(`${API_NOTAS}/${nota.id}`, { method: 'DELETE' }).catch(() => {});
         notas = notas.filter((n) => n.id !== nota.id);
       }
     }
     abierta = null;
+    tabla = null;
     editor.hidden = true;
     document.body.classList.remove('modal-abierto');
     pintar();

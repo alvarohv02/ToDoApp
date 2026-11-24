@@ -696,11 +696,49 @@ def _poner_en_carpeta(connection, tarea_id, carpeta_id, grupo_id):
 # De texto libre o listas (como la de la compra) cuyos elementos se tachan al pulsarlos.
 # Se ven y se cambian igual que las tareas: las del usuario y las compartidas en sus grupos.
 
-TIPOS_NOTA = ('texto', 'lista')
+TIPOS_NOTA = ('texto', 'lista', 'tabla')
 MAX_NOTAS = 500
 MAX_ELEMENTOS = 300
 MAX_TITULO_NOTA = 80
 MAX_CONTENIDO_NOTA = 20000
+# Tablas (como una hoja de Excel): filas x columnas de texto; las fórmulas (=SUMA(B2:B5)) se calculan en la web
+MAX_FILAS_TABLA = 200
+MAX_COLUMNAS_TABLA = 26
+MAX_CELDA = 500
+TABLA_NUEVA = {'filas': [['', '', ''] for _ in range(4)], 'encabezado': True}
+
+
+def _tabla(valor):
+    """Contenido de una nota de tabla: JSON {'filas': [[celda, …], …], 'encabezado': bool} limpio y validado."""
+    try:
+        datos = json.loads(valor) if isinstance(valor, str) else valor
+    except ValueError as error:
+        raise DatosNoValidos('La tabla no es válida') from error
+    filas = datos.get('filas') if isinstance(datos, dict) else None
+    if not isinstance(filas, list) or not filas or not all(isinstance(f, list) for f in filas):
+        raise DatosNoValidos('La tabla no es válida')
+    if len(filas) > MAX_FILAS_TABLA:
+        raise DatosNoValidos(f'Una tabla puede tener como mucho {MAX_FILAS_TABLA} filas')
+    columnas = max(len(f) for f in filas)
+    if not 1 <= columnas <= MAX_COLUMNAS_TABLA:
+        raise DatosNoValidos(f'Una tabla puede tener como mucho {MAX_COLUMNAS_TABLA} columnas')
+    limpias = []
+    for fila in filas:
+        celdas = ['' if c is None else str(c) if isinstance(c, (str, int, float)) else None for c in fila]
+        if None in celdas:
+            raise DatosNoValidos('La tabla no es válida')
+        if any(len(c) > MAX_CELDA for c in celdas):
+            raise DatosNoValidos(f'Cada celda puede tener como mucho {MAX_CELDA} caracteres')
+        limpias.append(celdas + [''] * (columnas - len(celdas)))  # todas las filas con las mismas columnas
+    return json.dumps({'filas': limpias, 'encabezado': bool(datos.get('encabezado', True))}, ensure_ascii=False)
+
+
+def _contenido_nota(tipo, valor):
+    if tipo == 'texto':
+        return _texto_nota(valor, MAX_CONTENIDO_NOTA, 'El texto')
+    if tipo == 'tabla':
+        return _tabla(valor if valor not in (None, '') else TABLA_NUEVA)
+    return ''
 MAX_ELEMENTO = 200
 
 
@@ -754,9 +792,9 @@ def _texto_nota(valor, maximo, que):
 def crear_nota(datos):
     tipo = datos.get('tipo')
     if tipo not in TIPOS_NOTA:
-        raise DatosNoValidos('Elige si la nota es de texto libre o una lista')
+        raise DatosNoValidos('Elige si la nota es de texto libre, una lista o una tabla')
     titulo = _texto_nota(datos.get('titulo'), MAX_TITULO_NOTA, 'El título').strip()
-    contenido = _texto_nota(datos.get('contenido'), MAX_CONTENIDO_NOTA, 'El texto') if tipo == 'texto' else ''
+    contenido = _contenido_nota(tipo, datos.get('contenido'))
     grupo_id = comprobar_grupo('notas', datos.get('grupo_id'))
     condicion, parametros = _filtro_dueno('notas')
     with get_db_connection() as connection:
@@ -776,8 +814,8 @@ def cambiar_nota(nota_id, datos):
         return None
     titulo = _texto_nota(datos['titulo'], MAX_TITULO_NOTA, 'El título').strip() if 'titulo' in datos else nota['titulo']
     contenido = nota['contenido']
-    if 'contenido' in datos and nota['tipo'] == 'texto':
-        contenido = _texto_nota(datos['contenido'], MAX_CONTENIDO_NOTA, 'El texto')
+    if 'contenido' in datos and nota['tipo'] in ('texto', 'tabla'):
+        contenido = _contenido_nota(nota['tipo'], datos['contenido'])
     fijada = bool(datos['fijada']) if 'fijada' in datos else nota['fijada']
     grupo_id = comprobar_grupo('notas', datos.get('grupo_id'), nota) if 'grupo_id' in datos else nota['grupo_id']
     with get_db_connection() as connection:

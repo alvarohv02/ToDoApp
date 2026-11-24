@@ -7,7 +7,7 @@
         <div>
             <p class="eyebrow">Notas</p>
             <h1>Notas</h1>
-            <p class="page-subtitle">Apuntes de texto libre o listas (como la de la compra) que se tachan al pulsarlas.</p>
+            <p class="page-subtitle">Apuntes de texto libre, listas que se tachan al pulsarlas (como la de la compra) y tablas como en Excel.</p>
         </div>
         <div class="page-actions notas-acciones">
             <input class="input notas-buscar" type="search" placeholder="Buscar en las notas…" aria-label="Buscar en las notas" data-notas-buscar>
@@ -36,6 +36,11 @@
                 <strong>Lista</strong>
                 <small>Elementos que se tachan al pulsarlos, como la lista de la compra.</small>
             </button>
+            <button type="button" class="nota-tipo" data-tipo="tabla">
+                <span class="nota-tipo-icono" aria-hidden="true">📊</span>
+                <strong>Tabla</strong>
+                <small>Filas y columnas como en Excel, con sumas y fórmulas sencillas.</small>
+            </button>
         </div>
         <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-cerrar>Cancelar</button>
@@ -62,6 +67,18 @@
                 <button type="button" class="enlace-accion" data-nota-desmarcar>Desmarcar todo</button>
                 <button type="button" class="enlace-boton" data-nota-limpiar>Borrar tachados</button>
             </div>
+        </div>
+        <div class="nota-tabla-editor" data-nota-tabla hidden>
+            <div class="hoja-barra">
+                <button type="button" class="btn btn-ghost" data-tabla="fila" title="Añadir una fila debajo de la celda elegida">+ Fila</button>
+                <button type="button" class="btn btn-ghost" data-tabla="columna" title="Añadir una columna a la derecha de la celda elegida">+ Columna</button>
+                <button type="button" class="btn btn-ghost" data-tabla="quitar-fila" title="Quitar la fila de la celda elegida">− Fila</button>
+                <button type="button" class="btn btn-ghost" data-tabla="quitar-columna" title="Quitar la columna de la celda elegida">− Columna</button>
+                <label class="hoja-opcion"><input type="checkbox" data-tabla-encabezado> Primera fila como encabezado</label>
+            </div>
+            <div class="hoja-envoltorio" data-tabla-rejilla></div>
+            <p class="hoja-ayuda">Fórmulas: empieza por <code>=</code>, por ejemplo <code>=B2*C2</code> o <code>=SUMA(D2:D9)</code>
+                (también PROMEDIO, MIN, MAX, CONTAR y REDONDEAR). Intro baja a la siguiente fila y puedes pegar celdas copiadas de Excel.</p>
         </div>
         <div class="nota-pie">
             <label class="field nota-compartir" data-nota-grupo hidden>
