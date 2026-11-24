@@ -116,7 +116,7 @@ IMPORTANCIA = [
 VALOR_IMPORTANCIA = {'alta': 'Alta', 'maxima': 'Alta', 'urgente': 'Alta', 'importante': 'Alta',
                      'media': 'Media', 'normal': 'Media',
                      'baja': 'Baja', 'sin prisa': 'Baja', 'poco importante': 'Baja', 'no urgente': 'Baja'}
-PERSONA = re.compile(r'(?:,\s*)?\b(?:asignad[oa]\s+a|asignal[oa]\s+a|encargad[oa](?:\s+(?:a|de))?|responsable|'
+PERSONA = re.compile(r'(?:,\s*)?\b(?:asignad[oa]s?\s+a|asignal[oa]\s+a|encargad[oa]s?(?:\s+(?:a|de))?|responsable|'
                      r'persona(?:\s+encargada)?|que\s+l[oa]\s+haga)\s*:?\s+(\w+)')
 
 # ", para Marta" al final de la frase o entre comas: la persona encargada (no "para el lunes", "para mañana"...)
@@ -128,7 +128,7 @@ PERSONA_PARA = re.compile(rf',\s*para\s+(?!(?:{_NO_PERSONA})\b)([a-z]+)\s*(?=,|$
 # Dónde termina el valor de una carpeta o un grupo dicho en una frase: en una coma, al final o al
 # empezar otro dato ("carpeta Universidad para el viernes, importancia alta")
 _FIN_VALOR = (r'(?=\s*(?:[,;]|$|\s+(?:para|con|el|la|los|las|a\s+las|hoy|manana|pasado|esta|este|'
-              r'importancia|prioridad|asignad[oa]|encargad[oa]|responsable|persona|grupo|carpeta|compartid[oa]|'
+              r'importancia|prioridad|asignad[oa]s?|encargad[oa]s?|responsable|persona|grupo|carpeta|compartid[oa]s?|'
               r'urgente|importante|sin\s+prisa)\b))')
 # "en la carpeta Universidad", "carpeta: Casa", "#uni"
 CARPETA = [
@@ -136,7 +136,7 @@ CARPETA = [
     re.compile(r'(?:^|\s)#(?P<valor>\w+)'),
 ]
 # "compartida con el grupo Familia", "para el grupo Familia", "grupo: Familia"
-GRUPO = re.compile(r'(?:,\s*)?\b(?:compartid[oa]\s+con(?:\s+el\s+grupo)?|(?:en|para|con|del)\s+el\s+grupo|grupo)'
+GRUPO = re.compile(r'(?:,\s*)?\b(?:compartid[oa]s?\s+con(?:\s+el\s+grupo)?|(?:en|para|con|del)\s+el\s+grupo|grupo)'
                    r'\s*:?\s+(?P<valor>.+?)' + _FIN_VALOR)
 
 # Cambiar la carpeta o el grupo de una tarea que ya existe
@@ -704,6 +704,115 @@ def interpretar(texto, hoy=None, ahora=None):
 
 
     return None
+
+
+# --- Listas de tareas en un mensaje ---------------------------------------------------------
+# "Apunta:\n- pan\n- llamar a Marta mañana", "- X\n- Y", varias fichas separadas por una línea en blanco
+# o una petición por línea. Los datos de la cabecera ("Apunta para el viernes, carpeta Uni:") valen
+# para todas las tareas de la lista que no digan otra cosa.
+
+MAX_LISTA = 30
+_VINETA = re.compile(r'^\s*(?:[-•*·–—▪◦►>✓✔☐□]|\d{1,2}\s*[.)º-]|\[\s?[xX]?\s?\])\s*')
+CABECERA_LISTA = re.compile(r'^(?:por\s+favor\s+)?(?:apunta(?:me)?|anade(?:me)?|agrega(?:me)?|crea(?:me)?|mete(?:me)?|'
+                            r'nuevas?\s+tareas?|tareas?|tengo\s+que|hay\s+que|pendientes?|to\s*-?\s*do|'
+                            r'lista(?:\s+de\s+(?:tareas|cosas|pendientes))?)\b(?P<resto>.*)$')
+_RELLENO_CABECERA = re.compile(r'^\s*(?:(?:estas|las\s+siguientes|siguientes|lo\s+siguiente|unas|las|varias|todo\s+esto|esto)\s*)?'
+                               r'(?:tareas|cosas)?\b\s*')
+# Una línea de la lista que ya dice qué es ("recuérdame…", "añade al calendario…") se respeta tal cual
+_ORDEN_EXPLICITA = (CREAR, RECORDATORIO, EVENTO_EXPLICITO, EVENTO_CUMPLE)
+_COMUNES = ('fecha_limite', 'hora_limite', 'importancia', 'persona', 'carpeta', 'grupo')
+
+
+class ListaDemasiadoLarga(ValueError):
+    pass
+
+
+def _campos_cabecera(resto, hoy, ahora):
+    """Datos comunes de la cabecera: 'para el viernes, carpeta Universidad' -> {fecha_limite, carpeta…}."""
+    resto = resto.strip(' :.-,')
+    if not resto:
+        return {}
+    datos = _interpretar_creacion('Tarea ' + resto, hoy, ahora) or {}
+    return {k: v for k, v in datos.items() if k in _COMUNES and v and not (k == 'importancia' and v == 'Media')}
+
+
+def _como_peticion(linea):
+    """'comprar pan' -> 'apunta comprar pan'; 'recuérdame…' o 'añade al calendario…' se dejan como están."""
+    texto = _VINETA.sub('', linea, count=1).strip()
+    if any(patron.match(normalizar(texto)) for patron in _ORDEN_EXPLICITA):
+        return texto
+    return f'apunta {texto}'
+
+
+def dividir_lista(texto, hoy=None, ahora=None):
+    """Si el mensaje es una lista, devuelve (peticiones, datos comunes de la cabecera); si no, None.
+
+    Lanza ListaDemasiadoLarga si trae más de MAX_LISTA cosas.
+    """
+    if ahora is None:
+        ahora = datetime.combine(hoy, datetime.now().time()) if hoy else datetime.now()
+    hoy = hoy or ahora.date()
+
+    # Varias fichas separadas por líneas en blanco
+    bloques = [b.strip() for b in re.split(r'\n\s*\n', texto) if b.strip()]
+    if len(bloques) > 1 and all(es_ficha(b) for b in bloques):
+        return _comprobar_tamano(bloques), {}
+    if es_ficha(texto):
+        return None
+
+    lineas = [linea.strip() for linea in texto.split('\n') if linea.strip()]
+    if len(lineas) < 2:
+        return None
+
+    # Cabecera: "Apunta:", "Tareas para mañana:", "Apunta estas tareas" (sin nada más que datos)
+    primera = normalizar(lineas[0])
+    m = CABECERA_LISTA.match(primera) if not _VINETA.match(lineas[0]) else None
+    if m:
+        resto = _RELLENO_CABECERA.sub('', primera[m.start('resto'):], count=1)
+        tiene_dos_puntos = lineas[0].rstrip().endswith(':')
+        if tiene_dos_puntos or not resto.strip(' .'):
+            # Del original (con mayúsculas y tildes) para los nombres de carpeta y grupo; normalizar
+            # no cambia la longitud del texto, así que las posiciones valen en los dos
+            resto_original = lineas[0][m.start('resto'):]
+            relleno = _RELLENO_CABECERA.match(normalizar(resto_original))
+            comunes = _campos_cabecera(resto_original[relleno.end():] if relleno else resto_original, hoy, ahora)
+            return _comprobar_tamano([_como_peticion(linea) for linea in lineas[1:]]), comunes
+
+    # Sin cabecera: todas las líneas con viñeta o número
+    if all(_VINETA.match(linea) for linea in lineas):
+        return _comprobar_tamano([_como_peticion(linea) for linea in lineas]), {}
+
+    # Una petición por línea, solo si cada línea se entiende por sí sola
+    if all(interpretar(linea, hoy, ahora) for linea in lineas):
+        return _comprobar_tamano(lineas), {}
+    return None
+
+
+def _comprobar_tamano(peticiones):
+    if len(peticiones) > MAX_LISTA:
+        raise ListaDemasiadoLarga(f'Como mucho {MAX_LISTA} cosas por mensaje (me has mandado {len(peticiones)}). '
+                                  'Pártelo en varios mensajes.')
+    return peticiones
+
+
+def aplicar_comunes(accion, comunes, texto='', hoy=None):
+    """Rellena una tarea de la lista con los datos de la cabecera que ella no diga.
+
+    texto: la línea de la tarea. Si solo dice la hora ("entregar a las 14:00"), el día es el de la cabecera.
+    """
+    if not comunes or not accion or accion.get('intencion') != 'crear':
+        return accion
+    accion = dict(accion)
+    solo_hora = accion.get('hora_limite') and extraer_fecha(texto, hoy or datetime.now().date())[0] is None
+    if comunes.get('fecha_limite') and (not accion.get('fecha_limite') or solo_hora):
+        accion['fecha_limite'] = comunes['fecha_limite']
+        accion['hora_limite'] = accion.get('hora_limite') or comunes.get('hora_limite', '')
+    if accion.get('importancia', 'Media') == 'Media' and comunes.get('importancia'):
+        accion['importancia'] = comunes['importancia']
+    for campo in ('persona', 'carpeta', 'grupo'):
+        if not accion.get(campo) and comunes.get(campo):
+            accion[campo] = comunes[campo]
+    return accion
 
 
 # --- Varias peticiones en un mismo mensaje (sobre todo en audios) ------------------------

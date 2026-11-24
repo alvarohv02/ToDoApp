@@ -26,7 +26,7 @@ EMOJI_IMPORTANCIA = {'Alta': '🔴', 'Media': '🟡', 'Baja': '🟢'}
 AYUDA = """Puedes escribirme cosas como:
 - *Apunta* entregar la práctica el viernes a las 14:00, importancia alta, carpeta Universidad
 - *Tengo que* comprar pan mañana, compartida con Familia
-- *Formato*: cómo escribir una tarea con todos sus datos (carpeta, persona, grupo…)
+- *Formato*: cómo escribir una tarea con todos sus datos (carpeta, persona, grupo…) o *varias a la vez* en una lista
 - *¿Qué tengo* hoy / esta semana / el viernes? (eventos, tareas y recordatorios)
 - *Mis clases* / *cumpleaños este mes* / *eventos*
 - *Añade al calendario* la cena el sábado a las 21
@@ -72,6 +72,15 @@ Carpeta: Universidad
 Persona: Marta
 Grupo: Clase
 ```
+
+*Varias tareas a la vez:* una por línea debajo de *Apunta:*. Lo que pongas en esa primera línea vale para todas (salvo que una diga otra cosa):
+```
+Apunta para el viernes, carpeta Universidad:
+- Repasar el tema 3
+- Entregar la práctica a las 14:00
+- Imprimir apuntes, importancia baja
+```
+(También vale una lista con guiones o números sin cabecera, o varias fichas separadas por una línea en blanco.)
 
 *Cómo escribir cada dato*
 - *Fecha*: hoy, mañana, el viernes, 28/11, 3 de diciembre, en 2 semanas…
@@ -1175,9 +1184,12 @@ def _por_reglas(telefono, accion, pendiente, hoy, ahora):
     return _sobre_tarea(telefono, accion, hoy)
 
 
-def _responder_una(telefono, texto, pendiente, hoy, ahora):
-    """Respuesta a una sola petición, o None si no se ha entendido."""
-    accion = reglas.interpretar(texto, hoy, ahora)
+def _responder_una(telefono, texto, pendiente, hoy, ahora, comunes=None):
+    """Respuesta a una sola petición, o None si no se ha entendido.
+
+    comunes: datos de la cabecera de una lista que valen para la tarea si ella no dice otra cosa.
+    """
+    accion = reglas.aplicar_comunes(reglas.interpretar(texto, hoy, ahora), comunes, texto, hoy)
 
     respuesta = None
     if pendiente and pendiente.get('tipo') == 'pedir_hora':
@@ -1226,23 +1238,36 @@ def _responder(telefono, texto, hoy=None, ahora=None):
     # "a las cinco y media" -> "a las 5 y media": los audios llegan con los números escritos en letra
     # "Jarvis, dime qué tengo hoy" -> "qué tengo hoy"; luego "a las cinco" -> "a las 5"
     texto_cifras = numeros_a_digitos(reglas.quitar_llamada(texto))
-    # Una ficha ("Tarea: …\nFecha: …") es una sola petición aunque tenga varias líneas
-    peticiones = [texto_cifras] if reglas.es_ficha(texto_cifras) else reglas.dividir_peticiones(texto_cifras)
+    # Una lista ("Apunta:\n- pan\n- leche", varias fichas, una petición por línea) son varias peticiones,
+    # con los datos comunes de su cabecera; una ficha sola es una petición aunque tenga varias líneas
+    comunes, demasiadas = {}, None
+    try:
+        lista = reglas.dividir_lista(texto_cifras, hoy, ahora)
+    except reglas.ListaDemasiadoLarga as error:
+        lista, demasiadas = None, str(error)
+    if lista:
+        peticiones, comunes = lista
+    elif reglas.es_ficha(texto_cifras):
+        peticiones = [texto_cifras]
+    else:
+        peticiones = reglas.dividir_peticiones(texto_cifras)
 
     # Todo lo que cambie este mensaje queda apuntado para poder deshacerlo luego
     marca = db.empezar_diario()
     try:
-        if reglas.es_deshacer(texto_cifras):
+        if demasiadas:
+            respuesta = f'😅 {demasiadas}'
+        elif reglas.es_deshacer(texto_cifras):
             respuesta = _deshacer(telefono)
         elif len(peticiones) == 1:
-            respuesta = _responder_una(telefono, texto_cifras, pendiente, hoy, ahora) or \
-                'No te he entendido 🤔 Escribe *ayuda* para ver qué puedo hacer.'
+            respuesta = _responder_una(telefono, peticiones[0] if lista else texto_cifras, pendiente, hoy, ahora,
+                                       comunes) or 'No te he entendido 🤔 Escribe *ayuda* para ver qué puedo hacer.'
         else:
             log.info('Mensaje con %d peticiones: %s', len(peticiones), peticiones)
             partes = []
             for peticion in peticiones:
                 # La pregunta pendiente solo puede responderla la primera parte del mensaje
-                parte = _responder_una(telefono, peticion, pendiente if not partes else None, hoy, ahora)
+                parte = _responder_una(telefono, peticion, pendiente if not partes else None, hoy, ahora, comunes)
                 partes.append(parte or f'🤔 No he entendido: «{peticion}»')
             respuesta = f'He apuntado {len(peticiones)} cosas:\n\n' + '\n\n'.join(
                 f'*{i}.* {parte}' for i, parte in enumerate(partes, 1))
