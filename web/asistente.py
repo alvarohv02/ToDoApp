@@ -3,6 +3,7 @@
 Todo se ejecuta en tu servidor; no se envía nada a servicios de IA externos.
 """
 from contextlib import contextmanager
+import contextvars
 from datetime import date, datetime, timedelta
 import logging
 import re
@@ -23,8 +24,9 @@ log = logging.getLogger(__name__)
 EMOJI_IMPORTANCIA = {'Alta': '🔴', 'Media': '🟡', 'Baja': '🟢'}
 
 AYUDA = """Puedes escribirme cosas como:
-- *Apunta* entregar la práctica el viernes a las 14:00, importancia alta
-- *Tengo que* comprar pan mañana
+- *Apunta* entregar la práctica el viernes a las 14:00, importancia alta, carpeta Universidad
+- *Tengo que* comprar pan mañana, compartida con Familia
+- *Formato*: cómo escribir una tarea con todos sus datos (carpeta, persona, grupo…)
 - *¿Qué tengo* hoy / esta semana / el viernes? (eventos, tareas y recordatorios)
 - *Mis clases* / *cumpleaños este mes* / *eventos*
 - *Añade al calendario* la cena el sábado a las 21
@@ -44,12 +46,43 @@ AYUDA = """Puedes escribirme cosas como:
 - *Mueve* la compra al lunes / *quita la fecha* de la compra
 - *Cambia la importancia* del informe a alta
 - *Asigna* el informe a Marta / *¿Qué tiene* Marta?
+- *Mueve* el informe *a la carpeta* Trabajo / *saca* el informe *de la carpeta*
+- *Comparte* la compra *con* Familia / *deja de compartir* la compra
+- *Tareas de la carpeta* Universidad / *tareas del grupo* Familia
+- *Mis carpetas* / *mis grupos*
 - *Borra* la tarea del gimnasio
 - *Recuérdame* mañana a las 10 que tengo reunión
 - *Avísame* en 20 minutos de sacar la ropa
 - *Mis recordatorios* / *cancela el recordatorio* de la reunión
 - *Deshaz* (o «me he equivocado»): vuelve atrás lo último que hice
 - *Correos*: los no leídos de todas tus cuentas; luego *lee 2*, *archiva 1*, *borra 3* o *marca todos como leídos*"""
+
+AYUDA_TAREAS = """📝 *Cómo apuntar una tarea con todos sus datos*
+
+*Opción 1: en una frase.* Empieza por *apunta*, *añade* o *tengo que* y añade los datos que quieras, separados por comas:
+_Apunta entregar la práctica el viernes a las 14:00, importancia alta, carpeta Universidad, encargado Marta, grupo Clase_
+
+*Opción 2: una ficha*, un dato por línea (copia esta y cámbiala). Solo *Tarea* es obligatoria:
+```
+Tarea: Entregar la práctica
+Fecha: viernes
+Hora: 14:00
+Importancia: alta
+Carpeta: Universidad
+Persona: Marta
+Grupo: Clase
+```
+
+*Cómo escribir cada dato*
+- *Fecha*: hoy, mañana, el viernes, 28/11, 3 de diciembre, en 2 semanas…
+- *Hora*: a las 14:00, a las 9 y media, esta tarde (en la ficha basta con 14:00)
+- *Importancia*: alta, media o baja (también «urgente» o «sin prisa»). Si no dices nada: media
+- *Carpeta*: «carpeta Universidad», «en la carpeta Casa» o «#casa»
+- *Persona*: «encargado Marta», «asignada a Pedro», «para Lucía». Si no: tú
+- *Grupo*: «grupo Familia» o «compartida con Familia». Si no: solo para ti
+  (si la carpeta es de un grupo, la tarea se comparte con ese grupo)
+{mis_datos}
+*Después* puedes cambiarla: _mueve la práctica a la carpeta Trabajo_, _comparte la práctica con Familia_, _asigna la práctica a Marta_, _cambia la importancia de la práctica a baja_, _mueve la práctica al lunes a las 10_"""
 
 VERBOS = {
     'completar': 'Marcada como hecha ✅',
@@ -59,6 +92,8 @@ VERBOS = {
     'importancia': 'Importancia cambiada',
     'asignar': 'Asignada 👤',
     'renombrar': 'Renombrada ✏️',
+    'carpeta': 'Movida de carpeta 📁',
+    'compartir': 'Compartida 👨‍👩‍👧',
 }
 
 
@@ -70,6 +105,31 @@ def _fecha_tarea(tarea, hoy):
     return f'{texto} a las {tarea["hora_limite"]}' if tarea.get('hora_limite') else texto
 
 
+# Nombres de las carpetas y los grupos del usuario: se buscan una vez por mensaje (se vacía en _como_dueno)
+_NOMBRES = contextvars.ContextVar('nombres_carpetas_grupos', default=None)
+
+
+def _nombres():
+    nombres = _NOMBRES.get()
+    if nombres is None:
+        usuario = db.id_dueno()
+        nombres = ({c['id']: c['nombre'] for c in db.listar_carpetas()},
+                   {g['id']: g['nombre'] for g in (db.grupos_de(usuario) if usuario else [])})
+        _NOMBRES.set(nombres)
+    return nombres
+
+
+def _donde(tarea):
+    """'📁 Universidad · 👨‍👩‍👧 Familia' (lo que tenga), para los listados y las confirmaciones."""
+    carpetas, grupos = _nombres()
+    partes = []
+    if tarea.get('carpeta_id') in carpetas:
+        partes.append(f'📁 {carpetas[tarea["carpeta_id"]]}')
+    if tarea.get('grupo_id') in grupos:
+        partes.append(f'👨‍👩‍👧 {grupos[tarea["grupo_id"]]}')
+    return partes
+
+
 def _linea(tarea, hoy):
     partes = [f'{EMOJI_IMPORTANCIA.get(tarea["importancia"], "")} *{tarea["nombre"]}*'.strip()]
     if tarea['fecha_limite']:
@@ -79,6 +139,7 @@ def _linea(tarea, hoy):
         partes.append('en curso')
     if not db.es_persona_por_defecto(tarea['persona']):
         partes.append(tarea['persona'])
+    partes.extend(_donde(tarea))
     return '- ' + ' · '.join(partes)
 
 
@@ -155,9 +216,11 @@ def _ve_el_correo():
 def _como_dueno(telefono):
     """Atiende al chat como su usuario: sus eventos y sus recordatorios, no los de otro."""
     marca = db.usar_usuario(db.usuario_por_chat(telefono))
+    nombres = _NOMBRES.set(None)
     try:
         yield
     finally:
+        _NOMBRES.reset(nombres)
         db.soltar_usuario(marca)
 
 
@@ -318,11 +381,33 @@ def _listar_eventos(periodo, categoria, hoy):
 
 
 def _listar_tareas_filtradas(filtros, hoy):
-    """'tareas importantes sin fecha', 'tareas en curso de Marta'... Sin filtros: separadas por con/sin fecha."""
+    """'tareas importantes sin fecha', 'tareas en curso de Marta', 'tareas de la carpeta Uni'...
+    Sin filtros: separadas por con/sin fecha."""
+    filtros = dict(filtros)
+    # "tareas de Universidad": si nadie se llama así pero hay una carpeta (o un grupo) con ese nombre, es eso
+    persona = filtros.get('persona')
+    if persona and not herramientas.listar_tareas(persona=persona, incluir_terminadas=True):
+        if herramientas.carpeta_por_nombre(persona):
+            filtros['carpeta'] = filtros.pop('persona')
+        elif herramientas.grupo_por_nombre(persona):
+            filtros['grupo'] = filtros.pop('persona')
+
     status = filtros.get('status')
     tareas = herramientas.listar_tareas(status=status, incluir_terminadas=status == 'Terminado',
                                         importancia=filtros.get('importancia'), persona=filtros.get('persona'))
     descripcion = []
+    if filtros.get('carpeta'):
+        carpeta = herramientas.carpeta_por_nombre(filtros['carpeta'])
+        if carpeta is None:
+            return herramientas_error(lambda: herramientas.resolver_carpeta(filtros['carpeta']))
+        tareas = [t for t in tareas if t.get('carpeta_id') == carpeta['id']]
+        descripcion.append(f'de la carpeta 📁 {carpeta["nombre"]}')
+    if filtros.get('grupo'):
+        grupo = herramientas.grupo_por_nombre(filtros['grupo'])
+        if grupo is None:
+            return herramientas_error(lambda: herramientas.resolver_grupo(filtros['grupo']))
+        tareas = [t for t in tareas if t.get('grupo_id') == grupo['id']]
+        descripcion.append(f'del grupo 👨‍👩‍👧 {grupo["nombre"]}')
     if filtros.get('periodo'):
         desde, hasta = rango_periodo(filtros['periodo'], hoy)
         if desde:
@@ -355,6 +440,55 @@ def _listar_tareas_filtradas(filtros, hoy):
     sin_fecha = [t for t in tareas if not t['fecha_limite']]
     bloques = [_bloque('📅 Con fecha', con_fecha, hoy), _bloque('📝 Sin fecha', sin_fecha, hoy)]
     return f'*Tareas pendientes* ({len(tareas)})\n\n' + '\n\n'.join(b for b in bloques if b)
+
+
+def herramientas_error(funcion):
+    """El mensaje de error (con las opciones que hay) de resolver una carpeta o un grupo que no existe."""
+    try:
+        funcion()
+    except db.DatosNoValidos as error:
+        return error.mensaje
+    return 'No lo encuentro.'
+
+
+def _listar_carpetas():
+    carpetas = db.listar_carpetas()
+    if not carpetas:
+        return 'Aún no tienes carpetas. Créalas en la web, en *Tareas* → *+ Carpeta*.'
+    tareas = herramientas.listar_tareas()
+    _, grupos = _nombres()
+    lineas = []
+    for carpeta in carpetas:
+        cuantas = sum(1 for t in tareas if t.get('carpeta_id') == carpeta['id'])
+        de_grupo = f' · 👨‍👩‍👧 {grupos.get(carpeta["grupo_id"], "grupo")}' if carpeta['grupo_id'] else ''
+        lineas.append(f'- 📁 *{carpeta["nombre"]}* ({cuantas} pendiente{"" if cuantas == 1 else "s"}){de_grupo}')
+    return f'*Tus carpetas* ({len(carpetas)})\n' + '\n'.join(lineas) + \
+        '\n\nPara ver sus tareas: _tareas de la carpeta ' + carpetas[0]['nombre'] + '_'
+
+
+def _listar_grupos():
+    usuario = db.id_dueno()
+    grupos = db.grupos_de(usuario) if usuario else []
+    if not grupos:
+        return 'No estás en ningún grupo. Créalos o acepta invitaciones en la web, en *Cuenta* → *Grupos*.'
+    lineas = []
+    for grupo in grupos:
+        miembros = ', '.join(m['nombre'] for m in db.miembros_de(grupo['id']))
+        comparte = ', '.join(db.TIPOS_GRUPO[t].lower() for t in grupo['comparte']) or 'nada'
+        lineas.append(f'- 👨‍👩‍👧 *{grupo["nombre"]}*: {miembros}\n  comparte {comparte}')
+    return f'*Tus grupos* ({len(grupos)})\n' + '\n'.join(lineas)
+
+
+def _ayuda_tareas():
+    carpetas, grupos = _nombres()
+    con_tareas = {g['id'] for g in herramientas.grupos_para_tareas()}
+    lineas = []
+    if carpetas:
+        lineas.append('📁 Tus carpetas: ' + ', '.join(carpetas.values()))
+    if con_tareas:
+        lineas.append('👨‍👩‍👧 Tus grupos: ' + ', '.join(n for i, n in grupos.items() if i in con_tareas))
+    mis_datos = ('\n' + '\n'.join(lineas) + '\n') if lineas else ''
+    return AYUDA_TAREAS.format(mis_datos=mis_datos)
 
 
 def _aviso_sin_fecha():
@@ -397,14 +531,35 @@ def _listar(telefono, periodo, filtro, persona, solo_tareas, hoy):
 
 
 def _crear(accion, hoy):
+    avisos = list(accion.get('avisos') or [])
+    # Una carpeta o un grupo que no existen no impiden apuntar la tarea: se avisa y se apunta sin ellos
+    carpeta_id = grupo_id = None
+    for campo, resolver in (('carpeta', herramientas.resolver_carpeta), ('grupo', herramientas.resolver_grupo)):
+        try:
+            valor = resolver(accion.get(campo, ''))
+        except db.DatosNoValidos as error:
+            avisos.append(error.mensaje + ('. La dejo sin carpeta.' if campo == 'carpeta' else '. La dejo solo para ti.'))
+            continue
+        if campo == 'carpeta':
+            carpeta_id = valor
+        else:
+            grupo_id = valor
+
     tarea = herramientas.crear_tarea(accion['nombre'], accion['importancia'], accion['fecha_limite'],
-                                     accion['persona'], hora_limite=accion.get('hora_limite', ''))
+                                     accion['persona'], hora_limite=accion.get('hora_limite', ''),
+                                     carpeta_id=carpeta_id, grupo_id=grupo_id)
+    if grupo_id and tarea.get('grupo_id') != grupo_id:
+        avisos.append('La carpeta es de otro grupo, así que la tarea se comparte con el grupo de la carpeta.')
     detalles = [f'{EMOJI_IMPORTANCIA[tarea["importancia"]]} importancia {tarea["importancia"].lower()}']
     if tarea['fecha_limite']:
         detalles.insert(0, f'para {_fecha_tarea(tarea, hoy)}')
     if not db.es_persona_por_defecto(tarea['persona']):
         detalles.append(f'encargado: {tarea["persona"]}')
-    return f'📝 Apuntada: *{tarea["nombre"]}*\n{" · ".join(detalles)}'
+    detalles.extend(_donde(tarea))
+    texto = f'📝 Apuntada: *{tarea["nombre"]}*\n{" · ".join(detalles)}'
+    if avisos:
+        texto += '\n\n' + '\n'.join(f'⚠️ {aviso}' for aviso in avisos)
+    return texto
 
 
 def _aplicar(intencion, tarea, extra, hoy):
@@ -433,6 +588,17 @@ def _aplicar(intencion, tarea, extra, hoy):
     elif intencion == 'asignar':
         herramientas.actualizar_tarea(tarea['id'], persona=extra['persona'])
         return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {extra["persona"]}'
+    elif intencion == 'carpeta':
+        cambiada = herramientas.actualizar_tarea(tarea['id'], carpeta_id=extra['carpeta_id'])
+        if not extra['carpeta_id']:
+            return f'Sacada de su carpeta: *{tarea["nombre"]}*'
+        donde = ' · '.join(_donde(cambiada))
+        return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {donde}'
+    elif intencion == 'compartir':
+        cambiada = herramientas.actualizar_tarea(tarea['id'], grupo_id=extra['grupo_id'])
+        if not extra['grupo_id']:
+            return f'Ya no se comparte: *{tarea["nombre"]}* (ahora es solo tuya)'
+        return f'{VERBOS[intencion]}: *{tarea["nombre"]}* → {" · ".join(_donde(cambiada))}'
     return f'{VERBOS[intencion]}: *{tarea["nombre"]}*'
 
 
@@ -444,6 +610,11 @@ def _sobre_tarea(telefono, accion, hoy):
     # Cambiar fecha, hora o nombre vale también para eventos ("quita la fecha" solo para tareas)
     if intencion == 'renombrar' or (intencion == 'mover' and ('fecha' in accion or 'hora_inicio' in accion)):
         return _editar(telefono, accion, hoy)
+    # La carpeta o el grupo se buscan antes que la tarea: si no existen, no hay nada que preguntar
+    if intencion == 'carpeta':
+        extra = {'carpeta_id': herramientas.resolver_carpeta(extra.pop('carpeta'))}
+    elif intencion == 'compartir':
+        extra = {'grupo_id': herramientas.resolver_grupo(extra.pop('grupo'))}
     candidatas = herramientas.buscar_por_nombre(accion['objeto'])
 
     if not candidatas:
@@ -952,6 +1123,14 @@ def _por_reglas(telefono, accion, pendiente, hoy, ahora):
         return '¡A mandar! 💪'
     if intencion == 'ayuda':
         return AYUDA
+    if intencion == 'ayuda_tareas':
+        return _ayuda_tareas()
+    if intencion == 'ficha_sin_nombre':
+        return 'A la ficha le falta la línea *Tarea:* con lo que hay que hacer. Escribe *formato* para ver un ejemplo.'
+    if intencion == 'listar_carpetas':
+        return _listar_carpetas()
+    if intencion == 'listar_grupos':
+        return _listar_grupos()
     if intencion == 'listar':
         return _listar(telefono, accion['periodo'], accion['filtro'], accion['persona'],
                        accion.get('solo_tareas', False), hoy)
@@ -1047,7 +1226,8 @@ def _responder(telefono, texto, hoy=None, ahora=None):
     # "a las cinco y media" -> "a las 5 y media": los audios llegan con los números escritos en letra
     # "Jarvis, dime qué tengo hoy" -> "qué tengo hoy"; luego "a las cinco" -> "a las 5"
     texto_cifras = numeros_a_digitos(reglas.quitar_llamada(texto))
-    peticiones = reglas.dividir_peticiones(texto_cifras)
+    # Una ficha ("Tarea: …\nFecha: …") es una sola petición aunque tenga varias líneas
+    peticiones = [texto_cifras] if reglas.es_ficha(texto_cifras) else reglas.dividir_peticiones(texto_cifras)
 
     # Todo lo que cambie este mensaje queda apuntado para poder deshacerlo luego
     marca = db.empezar_diario()

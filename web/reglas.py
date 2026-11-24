@@ -116,7 +116,60 @@ IMPORTANCIA = [
 VALOR_IMPORTANCIA = {'alta': 'Alta', 'maxima': 'Alta', 'urgente': 'Alta', 'importante': 'Alta',
                      'media': 'Media', 'normal': 'Media',
                      'baja': 'Baja', 'sin prisa': 'Baja', 'poco importante': 'Baja', 'no urgente': 'Baja'}
-PERSONA = re.compile(r'(?:,\s*)?\b(?:asignada\s+a|asignala\s+a|encargad[oa]|responsable)\s*:?\s+(\w+)')
+PERSONA = re.compile(r'(?:,\s*)?\b(?:asignad[oa]\s+a|asignal[oa]\s+a|encargad[oa](?:\s+(?:a|de))?|responsable|'
+                     r'persona(?:\s+encargada)?|que\s+l[oa]\s+haga)\s*:?\s+(\w+)')
+
+# ", para Marta" al final de la frase o entre comas: la persona encargada (no "para el lunes", "para mañana"...)
+_NO_PERSONA = (r'el|la|los|las|hoy|manana|pasado|esta|este|esa|ese|antes|despues|cuando|lunes|martes|miercoles|'
+               r'jueves|viernes|sabado|domingo|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|'
+               r'octubre|noviembre|diciembre|que|ya|luego')
+PERSONA_PARA = re.compile(rf',\s*para\s+(?!(?:{_NO_PERSONA})\b)([a-z]+)\s*(?=,|$)')
+
+# Dónde termina el valor de una carpeta o un grupo dicho en una frase: en una coma, al final o al
+# empezar otro dato ("carpeta Universidad para el viernes, importancia alta")
+_FIN_VALOR = (r'(?=\s*(?:[,;]|$|\s+(?:para|con|el|la|los|las|a\s+las|hoy|manana|pasado|esta|este|'
+              r'importancia|prioridad|asignad[oa]|encargad[oa]|responsable|persona|grupo|carpeta|compartid[oa]|'
+              r'urgente|importante|sin\s+prisa)\b))')
+# "en la carpeta Universidad", "carpeta: Casa", "#uni"
+CARPETA = [
+    re.compile(r'(?:,\s*)?\b(?:(?:en|a|dentro\s+de)\s+(?:la\s+|mi\s+)?carpeta(?:\s+de)?|carpeta)\s*:?\s+(?P<valor>.+?)' + _FIN_VALOR),
+    re.compile(r'(?:^|\s)#(?P<valor>\w+)'),
+]
+# "compartida con el grupo Familia", "para el grupo Familia", "grupo: Familia"
+GRUPO = re.compile(r'(?:,\s*)?\b(?:compartid[oa]\s+con(?:\s+el\s+grupo)?|(?:en|para|con|del)\s+el\s+grupo|grupo)'
+                   r'\s*:?\s+(?P<valor>.+?)' + _FIN_VALOR)
+
+# Cambiar la carpeta o el grupo de una tarea que ya existe
+CARPETA_TAREA = re.compile(rf'^(?:mueve|mover|mete|meter|pon|poner|pasa|pasar|guarda|guardar|anade|agrega)\s+{_OBJETO}'
+                           r'(?P<objeto>.+?)\s+(?:a|en|dentro\s+de)\s+(?:la\s+|mi\s+)?carpeta\s+(?:de\s+)?(?P<carpeta>.+?)' + _FIN)
+SACAR_CARPETA = re.compile(rf'^(?:saca|sacar|quita|quitar)\s+{_OBJETO}(?P<objeto>.+?)\s+de\s+(?:la\s+|su\s+)?carpeta(?:\s+.+?)?' + _FIN)
+COMPARTIR = re.compile(rf'^(?:comparte|compartir|compartela|compartelo)\s+(?:{_OBJETO}(?P<objeto>.+?)\s+)?con\s+'
+                       r'(?:el\s+grupo\s+|el\s+|la\s+|los\s+|mi\s+)?(?P<grupo>.+?)' + _FIN)
+DEJAR_COMPARTIR = re.compile(rf'^(?:deja\s+de\s+compartir|no\s+compartas|descomparte)\s+{_OBJETO}(?P<objeto>.+?)'
+                             r'(?:\s+con\s+.+?)?' + _FIN)
+
+# Preguntas por el formato: "formato", "¿cómo creo una tarea?", "plantilla", "ejemplo de tarea"
+AYUDA_TAREAS = re.compile(r'^(?:(?:dame\s+|dime\s+|ver\s+|el\s+|la\s+|un\s+|una\s+)?(?:formato|plantilla|ficha|ejemplos?)'
+                          r'(?:\s+(?:de|para)\s+(?:una\s+|las\s+)?tareas?)?|ayuda\s+(?:con\s+|de\s+|para\s+)?(?:las\s+)?tareas?|'
+                          r'(?:como|que)\s+(?:creo|crear|apunto|apuntar|anado|anadir|hago|escribo|pongo|te\s+(?:escribo|digo|pido))'
+                          r'\s+(?:una\s+|las\s+)?tareas?(?:\s+(?:bien|completa|correctamente|con\s+todo))?|'
+                          r'como\s+se\s+(?:crea|apunta|escribe)\s+una\s+tarea|que\s+formato\s+.*|'
+                          r'como\s+tengo\s+que\s+(?:escribir|poner|mandar)(?:te)?\s+.*tareas?.*)' + _FIN)
+LISTAR_CARPETAS = re.compile(r'^(?:(?:que|mis|ver|las|lista\s+de)\s+)*carpetas(?:\s+(?:tengo|hay))?' + _FIN)
+LISTAR_GRUPOS = re.compile(r'^(?:(?:que|en\s+que|mis|ver|los|lista\s+de)\s+)*grupos(?:\s+(?:tengo|hay|estoy))?' + _FIN)
+
+# Ficha: una línea por dato. "tarea: …" es obligatoria; las demás, opcionales
+CAMPOS_FICHA = {
+    'tarea': 'nombre', 'nombre': 'nombre', 'titulo': 'nombre', 'que': 'nombre',
+    'fecha': 'fecha', 'dia': 'fecha', 'cuando': 'fecha', 'fecha limite': 'fecha',
+    'hora': 'hora', 'hora limite': 'hora',
+    'importancia': 'importancia', 'prioridad': 'importancia',
+    'carpeta': 'carpeta',
+    'persona': 'persona', 'encargado': 'persona', 'encargada': 'persona', 'responsable': 'persona', 'quien': 'persona',
+    'grupo': 'grupo', 'compartir': 'grupo', 'compartir con': 'grupo', 'compartida con': 'grupo',
+}
+_LINEA_FICHA = re.compile(r'^\s*[-•*]?\s*(?P<campo>' + '|'.join(sorted(CAMPOS_FICHA, key=len, reverse=True)) +
+                          r')\s*[:=]\s*(?P<valor>.*?)\s*$')
 
 RECORDATORIO = re.compile(r'^(?:por\s+favor\s+)?(?:recuerda(?:me)?|avisa(?:me)?|'
                           r'pon(?:me)?\s+un\s+(?:recordatorio|aviso)|recordatorio|aviso)\b\s*[:,-]?\s*(?P<resto>.+)$')
@@ -238,11 +291,29 @@ def _interpretar_edicion(original, normal, hoy, ahora):
     return None
 
 
+def _sacar_valor(texto, patron):
+    """Busca el patrón (sin tildes) y devuelve (valor tal como se escribió, texto sin esa parte)."""
+    m = patron.search(normalizar(texto))
+    if not m:
+        return '', texto
+    valor = texto[m.start('valor'):m.end('valor')].strip(' ,.;:«»"\'')
+    return valor, _quitar(texto, m)
+
+
 def _interpretar_creacion(original, hoy, ahora):
-    """Saca nombre, fecha, hora, importancia y persona de 'entregar la práctica el viernes a las 14, urgente'."""
+    """Saca nombre, fecha, hora, importancia, persona, carpeta y grupo de
+    'entregar la práctica el viernes a las 14, urgente, carpeta Universidad, grupo Clase'."""
     texto = original
     importancia = 'Media'
     persona = ''
+
+    # Primero carpeta y grupo: sus nombres pueden tener varias palabras
+    carpeta = grupo = ''
+    for patron in CARPETA:
+        carpeta, texto = _sacar_valor(texto, patron)
+        if carpeta:
+            break
+    grupo, texto = _sacar_valor(texto, GRUPO)
 
     for patron in IMPORTANCIA:
         m = patron.search(normalizar(texto))
@@ -251,7 +322,7 @@ def _interpretar_creacion(original, hoy, ahora):
             texto = _quitar(texto, m)
             break
 
-    m = PERSONA.search(normalizar(texto))
+    m = PERSONA.search(normalizar(texto)) or PERSONA_PARA.search(normalizar(texto))
     if m:
         persona = _persona(texto[m.start(1):m.end(1)])
         texto = _quitar(texto, m)
@@ -274,7 +345,73 @@ def _interpretar_creacion(original, hoy, ahora):
         'fecha_limite': fecha.isoformat() if fecha else '',
         'hora_limite': hora,
         'persona': persona,
+        'carpeta': carpeta,
+        'grupo': grupo,
     }
+
+
+def es_ficha(texto):
+    """True si el mensaje es una ficha de tarea: varias líneas «campo: valor», con la de «tarea:»."""
+    lineas = [normal for _, normal in _lineas(texto)]
+    campos = [CAMPOS_FICHA[re.sub(r'\s+', ' ', m.group('campo'))] for m in map(_LINEA_FICHA.match, lineas) if m]
+    return len(lineas) > 1 and 'nombre' in campos and len(campos) >= 2
+
+
+def _lineas(texto):
+    """Las líneas del texto original con su versión sin tildes (normalizar quita los saltos de línea)."""
+    return [(linea, normalizar(linea)) for linea in texto.split('\n')]
+
+
+def interpretar_ficha(texto, hoy, ahora):
+    """'tarea: X / fecha: viernes / hora: 14:00 / importancia: alta / carpeta: Uni / persona: Marta / grupo: Familia'.
+
+    Lo que no se entiende se devuelve en 'avisos' para decírselo al usuario en vez de inventárselo.
+    """
+    datos, avisos = {}, []
+    for linea, normal in _lineas(texto):
+        m = _LINEA_FICHA.match(normal)
+        if not m:
+            if normal.strip():
+                avisos.append(f'No sé qué es la línea «{linea.strip()}»')
+            continue
+        campo = CAMPOS_FICHA[re.sub(r'\s+', ' ', m.group('campo'))]
+        datos[campo] = linea[m.start('valor'):m.end('valor')].strip(' «»"\'')
+
+    nombre = datos.get('nombre', '')
+    accion = {'intencion': 'crear', 'nombre': nombre[:1].upper() + nombre[1:], 'importancia': 'Media',
+              'fecha_limite': '', 'hora_limite': '', 'persona': '', 'carpeta': datos.get('carpeta', ''),
+              'grupo': datos.get('grupo', ''), 'avisos': avisos}
+    if not nombre:
+        return {'intencion': 'ficha_sin_nombre'}
+
+    if datos.get('importancia'):
+        valor = re.sub(r'\s+', ' ', normalizar(datos['importancia'])).strip(' .')
+        if valor in VALOR_IMPORTANCIA:
+            accion['importancia'] = VALOR_IMPORTANCIA[valor]
+        else:
+            avisos.append(f'Importancia «{datos["importancia"]}» no válida (usa alta, media o baja): pongo media')
+
+    fecha_texto, hora_texto = datos.get('fecha', ''), datos.get('hora', '')
+    if hora_texto and re.fullmatch(r'\d{1,2}(?:[:.h]\d{2})?(?:\s*h)?', hora_texto.strip()):
+        hora_texto = 'a las ' + hora_texto.strip().replace('.', ':').rstrip('h ')
+    if fecha_texto or hora_texto:
+        momento, sobrante = extraer_momento(f'{fecha_texto} {hora_texto}'.strip(), ahora)
+        if momento and not sobrante.strip(' ,.'):
+            accion['fecha_limite'], accion['hora_limite'] = momento.date().isoformat(), f'{momento:%H:%M}'
+        else:
+            fecha, sobrante = extraer_fecha(fecha_texto, hoy) if fecha_texto else (None, '')
+            if fecha and not sobrante.strip(' ,.'):
+                accion['fecha_limite'] = fecha.isoformat()
+            elif fecha_texto:
+                avisos.append(f'No entiendo la fecha «{fecha_texto}» (prueba con «viernes», «mañana» o «28/11»): '
+                              'la dejo sin fecha')
+            if hora_texto:
+                avisos.append(f'No entiendo la hora «{datos["hora"]}» (usa 14:00): la dejo sin hora'
+                              if fecha else 'Para poner hora hace falta una fecha: la dejo sin hora')
+
+    if datos.get('persona'):
+        accion['persona'] = _persona(datos['persona'])
+    return accion
 
 
 def _quitar_patron(texto, patron):
@@ -384,6 +521,9 @@ def interpretar(texto, hoy=None, ahora=None):
         ahora = datetime.combine(hoy, datetime.now().time()) if hoy else datetime.now()
     hoy = hoy or ahora.date()
 
+    if es_ficha(original):
+        return interpretar_ficha(original, hoy, ahora)
+
     if SALUDO.match(normal):
         return {'intencion': 'saludo'}
     if GRACIAS.match(normal):
@@ -392,6 +532,12 @@ def interpretar(texto, hoy=None, ahora=None):
         return {'intencion': 'afirmacion'}
     if AYUDA.match(normal):
         return {'intencion': 'ayuda'}
+    if AYUDA_TAREAS.match(normal):
+        return {'intencion': 'ayuda_tareas'}
+    if LISTAR_CARPETAS.match(normal):
+        return {'intencion': 'listar_carpetas'}
+    if LISTAR_GRUPOS.match(normal):
+        return {'intencion': 'listar_grupos'}
 
     m = SELECCION.match(normal)
     if m:
@@ -503,6 +649,22 @@ def interpretar(texto, hoy=None, ahora=None):
         if evento:
             return evento
 
+    # Carpeta y grupo de una tarea: antes que mover ("mueve X a la carpeta Y") y que borrar ("quita X de la carpeta")
+    m = CARPETA_TAREA.match(normal)
+    if m:
+        return {'intencion': 'carpeta', 'objeto': _recortar(original, *m.span('objeto')),
+                'carpeta': _recortar(original, *m.span('carpeta')).strip('«»"\'')}
+    m = SACAR_CARPETA.match(normal)
+    if m:
+        return {'intencion': 'carpeta', 'objeto': _recortar(original, *m.span('objeto')), 'carpeta': ''}
+    m = DEJAR_COMPARTIR.match(normal)
+    if m:
+        return {'intencion': 'compartir', 'objeto': _recortar(original, *m.span('objeto')), 'grupo': ''}
+    m = COMPARTIR.match(normal)
+    if m and m.group('objeto'):
+        return {'intencion': 'compartir', 'objeto': _recortar(original, *m.span('objeto')),
+                'grupo': _recortar(original, *m.span('grupo')).strip('«»"\'')}
+
     # El orden importa: "cambia la importancia de X a alta" o "quita la fecha de X"
     # no deben confundirse con mover ni borrar
     for patron in CAMBIAR_IMPORTANCIA:
@@ -602,6 +764,9 @@ _FILTROS_TAREA = [
     ('status', re.compile(r'(?P<valor>en\s+curso|empezadas|sin\s+empezar|terminadas|hechas|completadas|acabadas)\b')),
     ('atrasadas', re.compile(r'(?:atrasadas|vencidas|retrasadas)\b')),
     ('periodo', re.compile(r'(?:(?:de|para|del|que\s+vencen)\s+)?' + _PERIODO + r'\b')),
+    # Carpeta y grupo van antes que persona ("de la carpeta X" no es de la persona "la") y llegan hasta el final
+    ('carpeta', re.compile(r'(?:(?:de|en)\s+(?:la\s+|mi\s+)?)?carpeta\s+(?P<valor>.+?)\s*[?!.]*$')),
+    ('grupo', re.compile(r'(?:(?:del|de|en\s+el)\s+)?grupo\s+(?P<valor>.+?)\s*[?!.]*$')),
     ('persona', re.compile(r'(?:de|asignadas\s+a|para)\s+(?P<valor>[a-z]+)\b')),
 ]
 _VALOR_FILTRO = {'alta': 'Alta', 'importantes': 'Alta', 'urgentes': 'Alta', 'media': 'Media', 'baja': 'Baja',
@@ -628,6 +793,8 @@ def _interpretar_filtro_tareas(original, normal):
             if f:
                 if nombre == 'persona':
                     filtros['persona'] = original[f.start('valor'):f.end('valor')].capitalize()
+                elif nombre in ('carpeta', 'grupo'):
+                    filtros[nombre] = original[f.start('valor'):f.end('valor')].strip(' «»"\'')
                 elif nombre == 'periodo':
                     filtros['periodo'] = f.group('periodo')
                 elif nombre in ('importancia', 'status'):

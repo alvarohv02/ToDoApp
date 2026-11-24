@@ -25,13 +25,17 @@ Campos de una tarea:
 - importancia: {', '.join(db.IMPORTANCIAS)}
 - status: {', '.join(db.ESTADOS)}
 - fecha_limite: AAAA-MM-DD o vacío
+- hora_limite: HH:MM o vacío (solo si hay fecha_limite)
 - persona: persona encargada
+- carpeta: nombre de una de las carpetas del usuario (o "" para ninguna)
+- grupo: nombre de uno de sus grupos para compartir la tarea (o "" para que sea solo suya)
 
 Reglas:
 - Convierte fechas relativas ("mañana", "el viernes") a AAAA-MM-DD usando la fecha de hoy.
 - Para modificar o borrar una tarea, primero usa listar_tareas para obtener su id. Nunca inventes ids.
 - Si varias tareas encajan, pregunta cuál antes de cambiar nada.
 - Si no se indica importancia al crear, usa Media.
+- Usa solo carpetas y grupos de la lista que se te da; si el usuario nombra otro, díselo en vez de inventarlo.
 - No inventes tareas: lo que digas debe salir de las herramientas.
 - Responde en español, breve y cercano. Sin tablas ni títulos. Fechas como dd/mm."""
 
@@ -54,6 +58,8 @@ _CAMPOS = {
     'hora_limite': {'type': 'string', 'description': 'HH:MM, opcional (requiere fecha_limite)'},
     'persona': {'type': 'string'},
     'status': {'type': 'string', 'enum': db.ESTADOS},
+    'carpeta': {'type': 'string', 'description': 'Nombre de la carpeta, o "" para sacarla de su carpeta'},
+    'grupo': {'type': 'string', 'description': 'Nombre del grupo con el que se comparte, o "" para que sea solo suya'},
 }
 
 TOOLS = [
@@ -122,7 +128,10 @@ def disponible():
 def responder(telefono, texto):
     """Devuelve la respuesta del LLM, o None si Ollama no está disponible."""
     hoy = date.today()
-    sistema = f'{SYSTEM_PROMPT}\n\nHoy es {DIAS_SEMANA_BONITOS[hoy.weekday()]} {hoy.isoformat()}.'
+    carpetas = ', '.join(c['nombre'] for c in db.listar_carpetas()) or 'ninguna'
+    grupos = ', '.join(g['nombre'] for g in herramientas.grupos_para_tareas()) or 'ninguno'
+    sistema = (f'{SYSTEM_PROMPT}\n\nHoy es {DIAS_SEMANA_BONITOS[hoy.weekday()]} {hoy.isoformat()}.\n'
+               f'Carpetas del usuario: {carpetas}.\nGrupos con los que puede compartir tareas: {grupos}.')
     mensajes = [{'role': 'system', 'content': sistema}, *db.historial(telefono, limite=10),
                 {'role': 'user', 'content': texto}]
 

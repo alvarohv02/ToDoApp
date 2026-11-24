@@ -1,6 +1,7 @@
 """Operaciones sobre tareas que usan tanto el motor de reglas como el LLM local."""
 from datetime import date, datetime
 from difflib import SequenceMatcher
+import re
 
 import db
 from fechas import normalizar
@@ -112,17 +113,90 @@ def buscar_por_nombre(consulta, incluir_terminadas=False):
     return [t for _, t in elegir(puntuadas)]
 
 
+# --- Carpetas y grupos por su nombre ("Universidad", "familia") ---------------------
+
+def _por_nombre(consulta, opciones):
+    """La opción ({'nombre': …}) que mejor encaja con lo escrito: igual, empieza igual, contiene o parecida."""
+    buscado = normalizar(consulta or '').strip(' .,«»"\'')
+    if not buscado:
+        return None
+    nombres = [(normalizar(o['nombre']).strip(), o) for o in opciones]
+    for prueba in (lambda n: n == buscado, lambda n: n.startswith(buscado) or buscado.startswith(n),
+                   lambda n: buscado in n or n in buscado):
+        encajan = [o for n, o in nombres if prueba(n)]
+        if len(encajan) == 1:
+            return encajan[0]
+        if encajan:
+            return None  # ambiguo: mejor preguntar que elegir mal
+    puntuadas = sorted(((parecido(consulta, o['nombre']), o) for o in opciones), key=lambda par: par[0], reverse=True)
+    elegidas = elegir(puntuadas, umbral=0.6)  # solo si una destaca claramente
+    return elegidas[0][1] if len(elegidas) == 1 else None
+
+
+def carpeta_por_nombre(nombre):
+    return _por_nombre(nombre, db.listar_carpetas())
+
+
+def grupos_para_tareas():
+    """Grupos del usuario actual que comparten tareas."""
+    usuario = db.id_dueno()
+    return db.grupos_de(usuario, tipo='tareas') if usuario else []
+
+
+def grupo_por_nombre(nombre):
+    return _por_nombre(re.sub(r'(?i)^(?:el\s+)?grupo\s+', '', nombre or ''), grupos_para_tareas())
+
+
+def _lista_nombres(opciones, icono):
+    return ', '.join(f'{icono} {o["nombre"]}' for o in opciones) or 'ninguno todavía'
+
+
+def resolver_carpeta(nombre):
+    """Id de la carpeta con ese nombre ('' -> None, sin carpeta). Si no existe, error con las que hay."""
+    if not (nombre or '').strip():
+        return None
+    carpeta = carpeta_por_nombre(nombre)
+    if carpeta is None:
+        raise db.DatosNoValidos(f'No encuentro la carpeta «{nombre}». Tus carpetas: '
+                                f'{_lista_nombres(db.listar_carpetas(), "📁")}')
+    return carpeta['id']
+
+
+def resolver_grupo(nombre):
+    """Id del grupo con ese nombre ('' -> None, solo para ti). Si no existe, error con los que hay."""
+    if not (nombre or '').strip():
+        return None
+    grupo = grupo_por_nombre(nombre)
+    if grupo is None:
+        raise db.DatosNoValidos(f'No encuentro el grupo «{nombre}» (o no comparte tareas). Tus grupos: '
+                                f'{_lista_nombres(grupos_para_tareas(), "👨‍👩‍👧")}')
+    return grupo['id']
+
+
 # --- Ejecución (formato "herramienta" que también usa el LLM) ---------------------
 
-def crear_tarea(nombre, importancia='Media', fecha_limite='', persona='', status='Sin Empezar', hora_limite=''):
+def crear_tarea(nombre, importancia='Media', fecha_limite='', persona='', status='Sin Empezar', hora_limite='',
+                carpeta=None, grupo=None, carpeta_id=None, grupo_id=None):
+    """carpeta y grupo por su nombre (los usa el LLM) o directamente por id."""
     datos = {'nombre': nombre, 'importancia': importancia, 'fecha_limite': fecha_limite or '',
              'hora_limite': hora_limite or '', 'persona': persona, 'status': status or 'Sin Empezar'}
     validar_campos(datos)
     datos['fecha'] = date.today().strftime('%d/%m/%Y')
+    carpeta_id = resolver_carpeta(carpeta) if carpeta else carpeta_id
+    grupo_id = resolver_grupo(grupo) if grupo else grupo_id
+    if carpeta_id:
+        datos['carpeta_id'] = carpeta_id
+    if grupo_id:
+        datos['grupo_id'] = grupo_id
     return db.insert_task(datos)
 
 
 def actualizar_tarea(id, **cambios):
+    # Por nombre (LLM): "carpeta": "Universidad" o "" para sacarla; "grupo": "Familia" o "" para dejar de compartir
+    if 'carpeta' in cambios:
+        cambios['carpeta_id'] = resolver_carpeta(cambios.pop('carpeta'))
+    if 'grupo' in cambios:
+        cambios['grupo_id'] = resolver_grupo(cambios.pop('grupo'))
     validar_campos(cambios)
     tarea = db.update_task(id, cambios)
     if tarea is None:
