@@ -3802,3 +3802,11 @@ tbody tr:last-child td {
         margin-left: 0;
     }
 }
+
+/* Calendario en el móvil: «⟳ Sincronizar» un poco más pequeño y siempre en una línea */
+@media (max-width: 700px) {
+    .google-boton {
+        font-size: 0.72rem;
+        white-space: nowrap;
+    }
+}
