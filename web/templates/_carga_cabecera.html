@@ -1,0 +1,51 @@
+{# Aviso de «Cargando…» mientras llega la página. Va en <head>, antes de app.css, y no depende de él:
+   así se ve en cuanto llega el HTML (y con el fondo del tema, no una pantalla en blanco), aunque la
+   conexión vaya lenta. app.css se carga sin bloquear el dibujado; el aviso lo tapa todo hasta que la
+   página está lista (CSS cargado y HTML leído) y entonces desaparece. #}
+<style>
+    html { background: #f5f6fa; color: #1b1f2e; }
+    @media (prefers-color-scheme: dark) { html:not([data-theme="light"]) { background: #0e1016; color: #e7e9f2; } }
+    html[data-theme="dark"] { background: #0e1016; color: #e7e9f2; }
+    .carga-pagina {
+        position: fixed; inset: 0; z-index: 2000; display: flex; flex-direction: column; align-items: center;
+        justify-content: center; gap: 0.9rem; padding: 2rem; background: #f5f6fa; color: #636b84; text-align: center;
+        font: 600 15px/1.5 "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) { html:not([data-theme="light"]) .carga-pagina { background: #0e1016; color: #9aa1b9; } }
+    html[data-theme="dark"] .carga-pagina { background: #0e1016; color: #9aa1b9; }
+    html.pagina-lista .carga-pagina { display: none; }
+    /* Mientras se ve el aviso, el resto de la página no se dibuja: sin CSS sería más ancha que la pantalla */
+    html:not(.pagina-lista) body > :not(.carga-pagina) { display: none !important; }
+    /* El círculo y el texto salen tras un momento: si la página carga rápido, ni se ven */
+    .carga-icono, .carga-texto { animation: carga-aparece 0.2s 0.3s both; }
+    .carga-icono {
+        width: 34px; height: 34px; border: 3px solid rgba(91, 91, 214, 0.2); border-top-color: #5b5bd6;
+        border-radius: 50%; animation: carga-aparece 0.2s 0.3s both, carga-gira 0.8s linear infinite;
+    }
+    .carga-texto { margin: 0; }
+    .carga-lenta { max-width: 20rem; animation: carga-aparece 0.3s 8s both; }
+    .carga-lenta p { margin: 0 0 0.8rem; font-weight: 500; font-size: 14px; }
+    .carga-lenta button {
+        padding: 0.5rem 1.1rem; border: 0; border-radius: 10px; background: #5b5bd6; color: #fff;
+        font: inherit; cursor: pointer;
+    }
+    @keyframes carga-aparece { from { opacity: 0; visibility: hidden; } to { opacity: 1; visibility: visible; } }
+    @keyframes carga-gira { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .carga-icono { animation: carga-aparece 0.2s 0.3s both; } }
+</style>
+<noscript><style>.carga-pagina { display: none; }</style></noscript>
+<script>
+    (function () {
+        var raiz = document.documentElement, css = false, dom = false;
+        function lista() { if (css && dom) raiz.classList.add('pagina-lista'); }
+        window.cssCargado = function () { css = true; lista(); };
+        document.addEventListener('DOMContentLoaded', function () { dom = true; lista(); });
+        // Por si el navegador no avisa de que el CSS ha cargado: al terminar de cargar todo, seguro que está
+        window.addEventListener('load', function () { css = dom = true; lista(); });
+        // Volver atrás a una página guardada en memoria: ya está lista
+        window.addEventListener('pageshow', function (evento) { if (evento.persisted) { css = dom = true; lista(); } });
+    })();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" media="print"
+      onload="this.media='all'; cssCargado()" onerror="this.media='all'; cssCargado()">
+<noscript><link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}"></noscript>

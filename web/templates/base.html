@@ -14,7 +14,7 @@
         <meta name="apple-mobile-web-app-status-bar-style" content="default">
         <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f6fa">
         <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1016">
-        <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+        {% include '_carga_cabecera.html' %}
         <meta name="persona-defecto" content="{{ persona_defecto }}">
         <script>
             // Tema guardado (claro/oscuro); sin preferencia se sigue al sistema. Va aquí para evitar un parpadeo.
@@ -26,6 +26,7 @@
         {% block cabecera %}{% endblock %}
     </head>
     <body>
+        {% include '_carga_cuerpo.html' %}
         {% set ruta = request.path %}
         {% set secciones = [
             ('/', 'Inicio', 'inicio'),

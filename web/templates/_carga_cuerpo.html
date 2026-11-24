@@ -1,0 +1,10 @@
+{# Lo que se ve mientras carga la página (ver _carga_cabecera.html) y la barrita de cuando se piden datos #}
+<div class="carga-pagina" role="status" aria-live="polite">
+    <div class="carga-icono" aria-hidden="true"></div>
+    <p class="carga-texto">Cargando…</p>
+    <div class="carga-lenta">
+        <p>Está tardando más de lo normal. Puede que la conexión vaya lenta.</p>
+        <button type="button" onclick="location.reload()">Reintentar</button>
+    </div>
+</div>
+<div class="carga-datos" aria-hidden="true"></div>

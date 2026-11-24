@@ -5,9 +5,12 @@
 //     y siga mostrando algo si no hay conexión (por ejemplo, con Tailscale desconectado).
 //   - Nunca guarda las respuestas de /api/: los datos se piden siempre al servidor.
 //
-// Estrategia "red primero, caché de respaldo": se intenta la red y, si falla, se sirve lo guardado.
-// Así una actualización del código llega en la siguiente carga sin tener que tocar nada aquí.
+// Estrategia "red primero, caché de respaldo": se intenta la red y, si falla o tarda más de ESPERA_RED,
+// se sirve lo guardado. Así una actualización del código llega en la siguiente carga sin tener que tocar
+// nada aquí, y con una conexión lenta la app abre igualmente (en vez de quedarse en blanco).
 const CACHE = 'mi-notion-v2';
+const ESPERA_RED = 3500;  // milisegundos
+const TARDE = Symbol('tarde');
 // Las páginas no se precargan: dependen de la sesión. Se guardan al visitarlas.
 const PRECARGA = [
     '/static/css/app.css',
@@ -45,19 +48,31 @@ self.addEventListener('fetch', (evento) => {
     if (esApi || esSesion) return;
     if (url.origin !== self.location.origin && !esVue) return;
 
+    const deLaRed = fetch(peticion).then((respuesta) => {
+        // Una redirección es la página de login (sesión caducada): no se guarda como si fuera la pedida
+        if ((respuesta.ok && !respuesta.redirected) || respuesta.type === 'opaque') {
+            const copia = respuesta.clone();
+            caches.open(CACHE).then((cache) => cache.put(peticion, copia)).catch(() => {});
+        }
+        return respuesta;
+    });
+    const guardada = () => caches.match(peticion, { ignoreSearch: peticion.mode === 'navigate' });
+    // Aunque se conteste con la copia, el service worker sigue vivo hasta que la red termine y se guarde
+    evento.waitUntil(deLaRed.catch(() => {}));
+
     evento.respondWith(
-        fetch(peticion)
-            .then((respuesta) => {
-                // Una redirección es la página de login (sesión caducada): no se guarda como si fuera la pedida
-                if ((respuesta.ok && !respuesta.redirected) || respuesta.type === 'opaque') {
-                    const copia = respuesta.clone();
-                    caches.open(CACHE).then((cache) => cache.put(peticion, copia)).catch(() => {});
-                }
-                return respuesta;
-            })
+        (async () => {
+            // Con la conexión lenta no se espera indefinidamente: pasado un rato, si hay copia, la copia.
+            // La respuesta de la red sigue llegando y se guarda para la próxima vez
+            const tarde = new Promise((resolver) => setTimeout(resolver, ESPERA_RED, TARDE));
+            const primero = await Promise.race([deLaRed, tarde]);
+            if (primero !== TARDE) return primero;
+            const copia = await guardada();
+            return copia || deLaRed;  // sin copia no queda otra que esperar a la red
+        })()
             .catch(async () => {
-                const guardada = await caches.match(peticion, { ignoreSearch: peticion.mode === 'navigate' });
-                if (guardada) return guardada;
+                const copia = await guardada();
+                if (copia) return copia;
                 if (peticion.mode === 'navigate') {
                     return new Response(
                         '<!DOCTYPE html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'

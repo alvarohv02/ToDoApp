@@ -3810,3 +3810,43 @@ tbody tr:last-child td {
         white-space: nowrap;
     }
 }
+
+/* Barrita de carga arriba mientras se piden datos al servidor y tardan (ver vigilarCargas en app.js) */
+.carga-datos {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1500;
+    display: none;
+    width: 100%;
+    height: 3px;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+html.cargando-datos .carga-datos {
+    display: block;
+}
+
+.carga-datos::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 40%;
+    background: var(--accent);
+    border-radius: 0 3px 3px 0;
+    animation: carga-datos-avanza 1.1s ease-in-out infinite;
+}
+
+@keyframes carga-datos-avanza {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(260%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .carga-datos::before {
+        width: 100%;
+        animation: none;
+        opacity: 0.6;
+    }
+}

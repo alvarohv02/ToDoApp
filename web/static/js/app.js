@@ -1,3 +1,53 @@
+// --- Avisos de carga ------------------------------------------------------------------------
+// Mientras se piden datos al servidor y tardan, una barrita arriba (si van rápido, ni se ve).
+// Al cambiar de sección, el «Cargando…» de la página (ver templates/_carga_cabecera.html).
+(function vigilarCargas() {
+  const raiz = document.documentElement;
+  if (window.fetch) {
+    const fetchOriginal = window.fetch.bind(window);
+    let pendientes = 0;
+    let espera = null;
+    const actualizar = () => {
+      if (pendientes > 0 && !espera && !raiz.classList.contains('cargando-datos')) {
+        espera = setTimeout(() => {
+          espera = null;
+          raiz.classList.toggle('cargando-datos', pendientes > 0);
+        }, 400);
+      } else if (pendientes === 0) {
+        clearTimeout(espera);
+        espera = null;
+        raiz.classList.remove('cargando-datos');
+      }
+    };
+    window.fetch = (...argumentos) => {
+      pendientes += 1;
+      actualizar();
+      return fetchOriginal(...argumentos).finally(() => {
+        pendientes -= 1;
+        actualizar();
+      });
+    };
+  }
+
+  let navegando = null;
+  document.addEventListener('click', (evento) => {
+    const enlace = evento.target.closest && evento.target.closest('a[href]');
+    if (!enlace || evento.defaultPrevented || evento.button !== 0 || evento.metaKey || evento.ctrlKey
+        || evento.shiftKey || evento.altKey || enlace.target === '_blank' || enlace.hasAttribute('download')) {
+      return;
+    }
+    const destino = new URL(enlace.href, window.location.href);
+    if (destino.origin !== window.location.origin || (destino.pathname === window.location.pathname
+        && destino.search === window.location.search)) {
+      return;  // otra web, o la misma página (un #ancla)
+    }
+    // Si la siguiente página tarda, se tapa esta con el «Cargando…»; si llega antes, ni se ve
+    clearTimeout(navegando);
+    navegando = setTimeout(() => raiz.classList.remove('pagina-lista'), 250);
+  });
+  window.addEventListener('pageshow', () => clearTimeout(navegando));
+}());
+
 const API_TASKS_URL = '/api/tareas';
 // A quién se asignan las tareas si no se indica nadie: el nombre del usuario que ha iniciado sesión
 const PERSONA_DEFECTO = (document.querySelector('meta[name="persona-defecto"]') || {}).content || 'Sin asignar';
