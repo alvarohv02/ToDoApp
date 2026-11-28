@@ -63,17 +63,46 @@ def enviar_mensaje(telefono, texto):
     return True
 
 
-def enviar_plantilla(telefono, nombre, idioma, parametros):
+def enviar_plantilla(telefono, nombre, idioma, parametros=()):
     """Mensaje con una plantilla aprobada por Meta: se puede enviar en cualquier momento."""
-    return _enviar({
-        'to': telefono,
-        'type': 'template',
-        'template': {
-            'name': nombre,
-            'language': {'code': idioma},
-            'components': [{'type': 'body', 'parameters': [{'type': 'text', 'text': p} for p in parametros]}],
-        },
-    })
+    plantilla = {'name': nombre, 'language': {'code': idioma}}
+    if parametros:  # una plantilla sin huecos (como hello_world) no lleva parámetros
+        plantilla['components'] = [{'type': 'body', 'parameters': [{'type': 'text', 'text': p} for p in parametros]}]
+    return _enviar({'to': telefono, 'type': 'template', 'template': plantilla})
+
+
+def comprobar_conexion():
+    """¿Funciona la conexión con Meta (token y número)? Devuelve (bien, texto para enseñar)."""
+    if not (_config('TOKEN') and _config('WHATSAPP_PHONE_NUMBER_ID')):
+        return False, 'Falta TOKEN o WHATSAPP_PHONE_NUMBER_ID en el .env'
+    version = _config('WHATSAPP_API_VERSION', 'v23.0')
+    try:
+        respuesta = requests.get(
+            f'https://graph.facebook.com/{version}/{_config("WHATSAPP_PHONE_NUMBER_ID")}',
+            params={'fields': 'display_phone_number,verified_name'},
+            headers={'Authorization': f'Bearer {_config("TOKEN")}'},
+            timeout=10,
+        )
+    except requests.RequestException as error:
+        log.warning('No se pudo contactar con Meta: %s', error)
+        return False, 'No se puede contactar con Meta (¿hay internet en el servidor?)'
+    if respuesta.ok:
+        datos = respuesta.json()
+        return True, f'Conectado como {datos.get("verified_name", "el bot")} ({datos.get("display_phone_number", "")})'
+    try:
+        detalle = respuesta.json().get('error', {}).get('message', '')
+    except ValueError:
+        detalle = ''
+    log.warning('Meta rechaza la conexión (%s): %s', respuesta.status_code, detalle)
+    if respuesta.status_code in (400, 401, 190) or 'token' in detalle.lower():
+        return False, 'Meta no acepta el token: ha caducado o se ha revocado (hay que poner uno nuevo en el .env)'
+    return False, f'Meta responde con un error ({respuesta.status_code})'
+
+
+def abrir_ventana(telefono):
+    """Manda la plantilla de prueba «hello_world» de Meta (se puede enviar siempre): al contestarla, el bot
+    vuelve a poder escribir libremente a ese número durante 24 h."""
+    return enviar_plantilla(telefono, 'hello_world', 'en_US')
 
 
 def _procesar(telefono, texto):

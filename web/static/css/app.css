@@ -3850,3 +3850,33 @@ html.cargando-datos .carga-datos {
         opacity: 0.6;
     }
 }
+
+/* Cuenta: si el bot puede escribirte por WhatsApp (ventana de 24 h) y el botón para reactivarlo */
+.wa-ventana {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.4rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.wa-ventana-titulo {
+    margin: 0;
+    font-size: 0.98rem;
+    font-weight: 750;
+}
+
+.wa-abierta {
+    color: var(--success);
+    font-weight: 650;
+}
+
+.wa-cerrada {
+    color: var(--warning);
+    font-weight: 650;
+}
+
+.wa-ventana form {
+    align-self: flex-start;
+}

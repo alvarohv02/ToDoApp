@@ -61,6 +61,27 @@
             {% endfor %}
         </ul>
         <p class="card-text">Los tuyos se cambian en el servidor (<code>python usuarios.py chats</code>).</p>
+        {% if ventanas_whatsapp %}
+        <div class="wa-ventana" id="whatsapp">
+            <h3 class="wa-ventana-titulo">¿Puede escribirte el bot por WhatsApp?</h3>
+            <ul class="cuenta-chats">
+                {% for ventana in ventanas_whatsapp %}
+                <li>💬 …{{ ventana.final }} ·
+                    {% if ventana.abierta %}<span class="wa-abierta">✅ Sí, hasta el {{ ventana.hasta }}</span>
+                    {% elif ventana.hasta %}<span class="wa-cerrada">⏸️ No, desde el {{ ventana.hasta }}</span>
+                    {% else %}<span class="wa-cerrada">⏸️ No: aún no le has escrito nunca</span>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="card-text">WhatsApp solo deja que el bot te escriba (recordatorios, resumen del día, avisos de tareas)
+                durante 24 h desde tu último mensaje. Escribirle tú siempre funciona. Si ha pasado más tiempo, pulsa el botón:
+                comprobará la conexión con Meta y te mandará un mensaje de prueba; contéstale cualquier cosa y vuelve a funcionar.</p>
+            <form method="post" action="/cuenta#whatsapp">
+                <input type="hidden" name="accion" value="whatsapp_reactivar">
+                <button type="submit" class="btn btn-primary">📲 Comprobar y reactivar WhatsApp</button>
+            </form>
+        </div>
+        {% endif %}
         {% else %}
         <form method="post" class="cuenta-form">
             <input type="hidden" name="accion" value="chats">

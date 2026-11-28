@@ -14,7 +14,7 @@
 - Registro desde la web (/registro): la cuenta queda pendiente hasta que el administrador la
   aprueba en su página Cuenta. Se puede desactivar con REGISTRO=no en el .env.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 import logging
@@ -398,6 +398,8 @@ def cuenta():
                 mensaje = 'Chats del bot guardados.'
         elif accion in ('aprobar', 'rechazar', 'eliminar') and usuario['es_admin']:
             mensaje, error = _accion_de_admin(accion, request.form.get('id') or '')
+        elif accion == 'whatsapp_reactivar' and usuario['es_admin']:
+            mensaje, error = _reactivar_whatsapp(usuarios.chats_de(usuario))
         elif (accion or '').startswith('grupo_'):
             mensaje, error = grupos.accion(usuario, request.form)
         else:
@@ -411,5 +413,48 @@ def cuenta():
         telegram=next((c[3:] for c in chats if c.startswith('tg:')), ''),
         pendientes=[u for u in otros if u['estado'] == 'pendiente'],
         activos=[u for u in otros if u['estado'] == 'activo'],
+        ventanas_whatsapp=_ventanas_whatsapp(chats) if usuario['es_admin'] else [],
         **grupos.datos(usuario),
     ), (400 if error else 200)
+
+
+# --- WhatsApp: la ventana de 24 h -------------------------------------------------------------
+# WhatsApp solo deja que el bot escriba libremente (recordatorios, resumen, avisos) en las 24 h
+# siguientes al último mensaje de cada persona. Para volver a abrirla, el bot manda una plantilla
+# de Meta (que se puede enviar siempre) y basta con contestarla.
+
+ESPERA_REACTIVAR = timedelta(minutes=5)
+_ultimo_reactivar = {}
+
+
+def _ventanas_whatsapp(chats):
+    """Para cada WhatsApp del usuario: hasta cuándo puede escribirle el bot (o desde cuándo no puede)."""
+    import avisos
+    ahora = datetime.now()
+    ventanas = []
+    for chat in (c for c in chats if not c.startswith('tg:')):
+        hasta = avisos.ventana_hasta(chat)
+        ventanas.append({'final': chat[-4:], 'abierta': bool(hasta and hasta > ahora),
+                         'hasta': hasta.strftime('%d/%m a las %H:%M') if hasta else ''})
+    return ventanas
+
+
+def _reactivar_whatsapp(chats):
+    """Comprueba la conexión con Meta y manda la plantilla a los WhatsApp del usuario. (mensaje, error)."""
+    import whatsapp
+    numeros = [c for c in chats if not c.startswith('tg:')]
+    if not numeros:
+        return None, 'No tienes ningún WhatsApp en el bot'
+    ahora = datetime.now()
+    if any(ahora - _ultimo_reactivar.get(n, datetime.min) < ESPERA_REACTIVAR for n in numeros):
+        return None, 'Ya te lo he mandado hace un momento: mira tu WhatsApp (puedes repetirlo en unos minutos)'
+    bien, estado = whatsapp.comprobar_conexion()
+    if not bien:
+        return None, f'WhatsApp no funciona: {estado}'
+    enviados = [n for n in numeros if whatsapp.abrir_ventana(n)]
+    for numero in enviados:
+        _ultimo_reactivar[numero] = ahora
+    if not enviados:
+        return None, f'{estado}, pero Meta no ha dejado enviar el mensaje (mira los registros del servidor)'
+    return (f'{estado}. Te he mandado un mensaje de prueba por WhatsApp: contéstale cualquier cosa y el bot '
+            'podrá volver a escribirte durante 24 h.'), None
